@@ -19,7 +19,14 @@ CURSEFORGE_FILES = 'https://media.forgecdn.net/files/%s/%s/%s'
 CURSEFORGE_API = 'https://api.cfwidget.com/%s'
 
 
-def get_latest_json(files_section, versions):
+def __get_datetime(unparsed_time=''):
+    if '.' not in unparsed_time:
+        return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%SZ')
+
+    return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+def __get_latest_json(files_section, versions):
     index = 0
     previous_time = datetime.min
     for version in versions:
@@ -28,10 +35,7 @@ def get_latest_json(files_section, versions):
                 continue
             upload_time: datetime
             unparsed_time = j['uploaded_at']
-            if '.' not in unparsed_time:
-                upload_time = datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%SZ')
-            else:
-                upload_time = datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+            upload_time = __get_datetime(unparsed_time)
             if upload_time > previous_time:
                 previous_time = upload_time
                 index = i
@@ -39,7 +43,7 @@ def get_latest_json(files_section, versions):
     return files_section[index]
 
 
-def get_file_url(url='', file_name=''):
+def __get_file_url(url='', file_name=''):
     id_part_1 = url[len(url) - 7:len(url) - 3]
     id_part_2 = url[len(url) - 3:len(url)]
     while id_part_2.startswith('0'):
@@ -48,9 +52,9 @@ def get_file_url(url='', file_name=''):
     return CURSEFORGE_FILES % (id_part_1, id_part_2, urllib.parse.quote(file_name))
 
 
-def download(output_folder='', url='', file_name=''):
+def __dl_from_file_url(output_folder='', url='', file_name=''):
     print("Downloading %s" % file_name)
-    file_request = urllib.request.Request(get_file_url(url, file_name), headers=HEADERS)
+    file_request = urllib.request.Request(__get_file_url(url, file_name), headers=HEADERS)
     file_url = urllib.request.urlopen(file_request)
     file = open(os.path.join(output_folder, file_name), 'wb')
 
@@ -65,6 +69,20 @@ def download(output_folder='', url='', file_name=''):
     print('Successfully finished download of file ' + file_name)
 
 
+def download_single(url='', output_folder='', versions=None):
+    url = url.strip()
+    print('Initializing download for url ' + url)
+    line_new = url.split(CURSEFORGE + '/')[1]
+    api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
+    api_url = urllib.request.urlopen(api_request)
+    api_json = json.loads(api_url.read().decode())
+    latest_json = __get_latest_json(api_json['files'], versions)
+
+    file_url = latest_json['url']
+    file_name = latest_json['name']
+    __dl_from_file_url(output_folder, file_url, file_name)
+
+
 def download_all(path='', output_folder='', versions=None):
     mods_file = open(path, 'r')
 
@@ -75,16 +93,7 @@ def download_all(path='', output_folder='', versions=None):
     for cur_line in mods_file_lines:
         if CURSEFORGE not in cur_line:
             continue
-        print('Initializing download for url ' + cur_line.strip())
-        line_new = cur_line.strip().split(CURSEFORGE + '/')[1]
-        api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
-        api_url = urllib.request.urlopen(api_request)
-        api_json = json.loads(api_url.read().decode())
-        latest_json = get_latest_json(api_json['files'], versions)
-
-        file_url = latest_json['url']
-        name = latest_json['name']
-        download(output_folder, file_url, name)
+        download_single(cur_line, output_folder, versions)
         downloaded_count += 1
 
     print('Successfully downloaded %s files' % downloaded_count)
