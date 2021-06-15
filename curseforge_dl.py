@@ -66,8 +66,13 @@ def __get_file_url(url='', file_name=''):
     :param file_name: The name of the file that is being downloaded
     :return: The direct download to the file
     """
-    id_part_1 = url[len(url) - 7:len(url) - 3]
-    id_part_2 = url[len(url) - 3:len(url)]
+    url_split = url.split('/')
+    id_full = url_split[len(url_split) - 1]
+    split = 4
+    if len(id_full) == 6:
+        split = 3
+    id_part_1 = id_full[0:split]
+    id_part_2 = id_full[split:len(id_full)]
     while id_part_2.startswith('0'):
         id_part_2 = id_part_2[1:len(id_part_2)]
 
