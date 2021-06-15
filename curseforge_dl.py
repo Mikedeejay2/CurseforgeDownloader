@@ -46,7 +46,7 @@ def __get_latest_json(files_json, versions=None):
     previous_time = datetime.min
     for version in versions:
         for i, j in enumerate(files_json):
-            if version is not None or version not in j['versions']:
+            if version is not None and version not in j['versions']:
                 continue
             upload_time: datetime
             unparsed_time = j['uploaded_at']
