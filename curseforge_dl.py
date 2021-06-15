@@ -34,6 +34,15 @@ def __get_datetime(unparsed_time=''):
     return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%S.%fZ')
 
 
+def __versions_compat(file_json, versions=None):
+    if versions is None:
+        return True
+    for version in versions:
+        if version in file_json['versions']:
+            return True
+    return False
+
+
 def __get_latest_json(files_json, versions=None):
     """
     Gets the latest json version for a Curseforge file
@@ -42,28 +51,20 @@ def __get_latest_json(files_json, versions=None):
     :param versions: A list of the versions to be considered
     :return: The json section for the latest uploaded file to the project based on the versions provided
     """
-    index = 0
+    json_index = 0
     previous_time = datetime.min
-    for i, j in enumerate(files_json):
-        included = False
-        if versions is not None:
-            for version in versions:
-                if version in j['versions']:
-                    included = True
-                    break
-        else:
-            included = True
-        if not included:
+    for cur_index, api_json in enumerate(files_json):
+        if not __versions_compat(api_json, versions):
             continue
 
         upload_time: datetime
-        unparsed_time = j['uploaded_at']
+        unparsed_time = api_json['uploaded_at']
         upload_time = __get_datetime(unparsed_time)
         if upload_time > previous_time:
             previous_time = upload_time
-            index = i
+            json_index = cur_index
 
-    return files_json[index]
+    return files_json[json_index]
 
 
 def __get_file_url(url='', file_name=''):
@@ -111,6 +112,19 @@ def __dl_from_file_url(output_folder='', url='', file_name=''):
     print('Successfully finished download of file ' + file_name)
 
 
+def __query_curseforge(url=''):
+    print('Initializing download for url ' + url)
+    line_new = url.split(CURSEFORGE + '/')[1]
+    api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
+    api_url = urllib.request.urlopen(api_request)
+    api_json = json.loads(api_url.read().decode())
+    return api_json
+
+
+def __get_files_json(api_json):
+    return api_json['files']
+
+
 def download_single(url='', output_folder='', versions=None):
     """
     Download the latest version of a Curseforge project from a link
@@ -121,12 +135,9 @@ def download_single(url='', output_folder='', versions=None):
     (Leaving None will download the latest version regardless of the version)
     """
     url = url.strip()
-    print('Initializing download for url ' + url)
-    line_new = url.split(CURSEFORGE + '/')[1]
-    api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
-    api_url = urllib.request.urlopen(api_request)
-    api_json = json.loads(api_url.read().decode())
-    latest_json = __get_latest_json(api_json['files'], versions)
+    api_json = __query_curseforge(url)
+    files_json = __get_files_json(api_json)
+    latest_json = __get_latest_json(files_json, versions)
 
     file_url = latest_json['url']
     file_name = latest_json['name']
@@ -155,3 +166,65 @@ def download_all(path='', output_folder='', versions=None):
         downloaded_count += 1
 
     print('Successfully downloaded %s files' % downloaded_count)
+
+
+def __get_all_file_names(folder=''):
+    folder_dir = os.fsencode(folder)
+    file_names = []
+    for cur_file in os.listdir(folder_dir):
+        file_name = os.fsdecode(cur_file)
+        file_names.append(file_name)
+    print(file_names)
+    return file_names
+
+
+def __check_exists_in_list(file_names='', file_name=''):
+    return file_name in file_names
+
+
+def __check_exists_in_folder(files_json, file_names=None, versions=None):
+    for cur_json in files_json:
+        if not __versions_compat(cur_json, versions):
+            continue
+        if cur_json['name'] in file_names:
+            return True
+    return False
+
+
+def check_single_update(url='', files_folder='', versions=None):
+    url = url.strip()
+
+    api_json = __query_curseforge(url)
+    files_json = __get_files_json(api_json)
+    latest_json = __get_latest_json(files_json, versions)
+
+    file_names = __get_all_file_names(files_folder)
+
+    exists = __check_exists_in_folder(files_json, file_names, versions)
+    print('%s exists? %s' % (url, exists))
+    # for cur_json in files_json:
+        # if not __versions_compat(cur_json, versions):
+        #     continue
+        # if cur_json['name'] is not file_name:
+        #     continue
+        # found = True
+        # if latest_json['name'] is not file_name:
+        #     print('The file %s needs to be updated.' % file_name)
+        #     return True
+    # if not found:
+    #     print('An existing file could not be found for the url %s' % url)
+
+    return False
+
+
+def check_for_updates(path='', files_folder='', versions=None):
+    mods_file = open(path, 'r')
+
+    mods_file_lines = mods_file.readlines()
+    needs_update_count = 1
+    for cur_line in mods_file_lines:
+        if CURSEFORGE not in cur_line:
+            continue
+        needs_update = check_single_update(cur_line, files_folder, versions)
+        if needs_update:
+            needs_update_count += 1
