@@ -169,6 +169,12 @@ def download_all(path='', output_folder='', versions=None):
 
 
 def __get_all_file_names(folder=''):
+    """
+    Iterate through a folder and get all file names located in that folder
+
+    :param folder: The path to the folder to be iterated through
+    :return: A list of all file names
+    """
     folder_dir = os.fsencode(folder)
     file_names = []
     for cur_file in os.listdir(folder_dir):
@@ -178,6 +184,15 @@ def __get_all_file_names(folder=''):
 
 
 def __check_exists_in_folder(files_json, file_names=None, versions=None):
+    """
+    Check whether a mod exists in a list of file names given a json file of all mod names and a list of versions to
+    check for
+
+    :param files_json: The json section for the mod
+    :param file_names: The list of file names
+    :param versions: A list of the versions to be considered
+    :return: True if it does exist in the folder, False if not
+    """
     for cur_json in files_json:
         if not __versions_compat(cur_json, versions):
             continue
@@ -187,6 +202,14 @@ def __check_exists_in_folder(files_json, file_names=None, versions=None):
 
 
 def __check_needs_update(files_json, file_names=None, versions=None):
+    """
+    Check whether a mod needs an update based on a json file of all mod names and a list of versions to check for
+
+    :param files_json: The json section for the mod
+    :param file_names: The list of file names
+    :param versions: A list of the versions to be considered
+    :return: True if it needs an update, False if not
+    """
     latest_json = __get_latest_json(files_json, versions)
 
     for cur_json in files_json:
@@ -201,6 +224,14 @@ def __check_needs_update(files_json, file_names=None, versions=None):
 
 
 def __check_single_update(api_json, files_folder='', versions=None):
+    """
+    Check a single mod using its json file for an update
+
+    :param api_json: The json from the Curseforge API for the mod
+    :param files_folder: The folder from the current mods folder
+    :param versions: A list of the versions to be considered
+    :return:
+    """
     files_json = __get_files_json(api_json)
 
     file_names = __get_all_file_names(files_folder)
@@ -224,6 +255,14 @@ def __check_single_update(api_json, files_folder='', versions=None):
 
 
 def check_single_update(url='', files_folder='', versions=None):
+    """
+    Check for a mod update from the mod's URL
+
+    :param url: The URL for the mod's project page
+    :param files_folder: The current mods folder
+    :param versions: A list of the versions to be considered when checking for updates
+    :return: True if an update is available, False if not
+    """
     url = url.strip()
 
     api_json = __query_curseforge(url)
@@ -231,6 +270,13 @@ def check_single_update(url='', files_folder='', versions=None):
 
 
 def check_for_updates(path='', files_folder='', versions=None):
+    """
+    Check a list of Curseforge mods for updates
+
+    :param path: The file path to the mods text file
+    :param files_folder: The current mods folder
+    :param versions: A list of the versions to be considered when checking for updates
+    """
     mods_file = open(path, 'r')
 
     mods_file_lines = mods_file.readlines()
@@ -245,6 +291,14 @@ def check_for_updates(path='', files_folder='', versions=None):
 
 
 def update_single(url='', files_folder='', versions=None):
+    """
+    Update a mod from a mod's URL
+
+    :param url: The URL for the mod's project page
+    :param files_folder: The current mods folder
+    :param versions: A list of the versions to be considered when updating
+    :return: True if the mod was updated, False if not
+    """
     api_json = __query_curseforge(url)
     needs_update = __check_single_update(api_json, files_folder, versions)
     if not needs_update:
@@ -269,6 +323,13 @@ def update_single(url='', files_folder='', versions=None):
 
 
 def update_all(path='', files_folder='', versions=None):
+    """
+    Update a list of Curseforge mods
+
+    :param path: The file path to the mods text file
+    :param files_folder: The current mods folder
+    :param versions: A list of the versions to be considered when updating
+    """
     mods_file = open(path, 'r')
 
     mods_file_lines = mods_file.readlines()
