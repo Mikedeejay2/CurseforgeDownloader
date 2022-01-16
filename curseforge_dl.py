@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-# Headers used to avoid 403 forbidden when connecting to urls, adds information to the request
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -113,11 +112,15 @@ def __dl_from_file_url(output_folder='', url='', file_name=''):
 
 
 def __query_curseforge(url=''):
-    line_new = url.split(CURSEFORGE + '/')[1]
-    api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
-    api_url = urllib.request.urlopen(api_request)
-    api_json = json.loads(api_url.read().decode())
-    return api_json
+    try:
+        line_new = url.split(CURSEFORGE + '/')[1]
+        api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
+        api_url = urllib.request.urlopen(api_request)
+        api_json = json.loads(api_url.read().decode())
+        return api_json
+    except urllib.error.HTTPError:
+        print("ERROR: This URL caused an error, please check that it is valid: %s" % url)
+        return
 
 
 def __get_files_json(api_json):
@@ -232,9 +235,17 @@ def __check_single_update(api_json, files_folder='', versions=None):
     :param versions: A list of the versions to be considered
     :return:
     """
-    files_json = __get_files_json(api_json)
+    if 'files' not in api_json:
+        print('ERROR: No files key found for project %s' % (api_json['title']))
+        return False
 
+    files_json = __get_files_json(api_json)
     file_names = __get_all_file_names(files_folder)
+
+    if len(files_json) == 0:
+        print('ERROR: No files found for project %s' % (api_json['title']))
+        return False
+
     latest_json = __get_latest_json(files_json, versions)
 
     for cur_json in files_json:
@@ -300,6 +311,9 @@ def update_single(url='', files_folder='', versions=None):
     :return: True if the mod was updated, False if not
     """
     api_json = __query_curseforge(url)
+    if api_json is None:
+        return False
+
     needs_update = __check_single_update(api_json, files_folder, versions)
     if not needs_update:
         return False
@@ -317,6 +331,7 @@ def update_single(url='', files_folder='', versions=None):
             continue
         print('Deleting file %s' % cur_name)
         os.remove(os.path.join(files_folder, cur_name))
+        file_names = __get_all_file_names(files_folder)
 
     download_single(url, files_folder, versions)
     return True
