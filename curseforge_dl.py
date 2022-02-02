@@ -33,27 +33,30 @@ def __get_datetime(unparsed_time=''):
     return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%S.%fZ')
 
 
-def __versions_compat(file_json, versions=None):
+def __versions_compat(file_json, versions=None, excluded=None):
     if versions is None:
         return True
     for version in versions:
         if version in file_json['versions']:
+            if excluded is not None and version in excluded:
+                return False
             return True
     return False
 
 
-def __get_latest_json(files_json, versions=None):
+def __get_latest_json(files_json, versions=None, excluded=None):
     """
     Gets the latest json version for a Curseforge file
 
     :param files_json: The files json section of the project
     :param versions: A list of the versions to be considered
+    :param excluded: The list of versions that should be excluded
     :return: The json section for the latest uploaded file to the project based on the versions provided
     """
     json_index = 0
     previous_time = datetime.min
     for cur_index, api_json in enumerate(files_json):
-        if not __versions_compat(api_json, versions):
+        if not __versions_compat(api_json, versions, excluded):
             continue
 
         upload_time: datetime
@@ -117,43 +120,51 @@ def __query_curseforge(url=''):
         api_request = urllib.request.Request(CURSEFORGE_API % line_new, headers=HEADERS)
         api_url = urllib.request.urlopen(api_request)
         api_json = json.loads(api_url.read().decode())
+        if 'title' not in api_json or api_json['title'] == 'Project is queued for fetch':
+            print('ERROR: This URL has not been captured yet, please rerun the script in a moment: ' % url)
+            return None
         return api_json
-    except urllib.error.HTTPError:
-        print("ERROR: This URL caused an error, please check that it is valid: %s" % url)
-        return
+    except urllib.error.HTTPError as e:
+        print('ERROR: URL caused error code %s: %s' % (e.code, url))
+        return None
 
 
 def __get_files_json(api_json):
     return api_json['files']
 
 
-def download_single(url='', output_folder='', versions=None):
+def download_single(url='', output_folder='', versions=None, excluded=None):
     """
     Download the latest version of a Curseforge project from a link
 
     :param url: The URL of the project page
     :param output_folder: The output folder location. Where all files will be downloaded to.
     :param versions: The list of versions that should be considered when downloading
+    :param excluded: The list of versions that should be excluded when downloading
     (Leaving None will download the latest version regardless of the version)
     """
     url = url.strip()
     api_json = __query_curseforge(url)
+    if api_json is None:
+        print('Skipping download for URL: %s' % url)
+        return
     print('Initializing download for ' + api_json['title'])
     files_json = __get_files_json(api_json)
-    latest_json = __get_latest_json(files_json, versions)
+    latest_json = __get_latest_json(files_json, versions, excluded)
 
     file_url = latest_json['url']
     file_name = latest_json['name']
     __dl_from_file_url(output_folder, file_url, file_name)
 
 
-def download_all(path='', output_folder='', versions=None):
+def download_all(path='', output_folder='', versions=None, excluded=None):
     """
     Download the latest version of all Curseforge project urls from a text document or similar
 
     :param path: The path to the input mods list (Text file or similar)
     :param output_folder: The output folder location. Where all files will be downloaded to.
     :param versions: The list of versions that should be considered when downloading
+    :param excluded: The list of versions that should be excluded when downloading
     (Leaving None will download the latest version regardless of the version)
     """
     mods_file = open(path, 'r')
@@ -165,7 +176,7 @@ def download_all(path='', output_folder='', versions=None):
     for cur_line in mods_file_lines:
         if CURSEFORGE not in cur_line:
             continue
-        download_single(cur_line, output_folder, versions)
+        download_single(cur_line, output_folder, versions, excluded)
         downloaded_count += 1
 
     print('Successfully downloaded %s files' % downloaded_count)
@@ -277,6 +288,9 @@ def check_single_update(url='', files_folder='', versions=None):
     url = url.strip()
 
     api_json = __query_curseforge(url)
+    if api_json is None:
+        print('Skipping update check for URL: %s' % url)
+        return
     return __check_single_update(api_json, files_folder, versions)
 
 
@@ -312,15 +326,14 @@ def update_single(url='', files_folder='', versions=None):
     """
     api_json = __query_curseforge(url)
     if api_json is None:
+        print('Skipping update for URL: %s' % url)
         return False
 
     needs_update = __check_single_update(api_json, files_folder, versions)
     if not needs_update:
         return False
 
-    api_json = __query_curseforge(url)
     files_json = __get_files_json(api_json)
-
     file_names = __get_all_file_names(files_folder)
 
     for cur_json in files_json:
