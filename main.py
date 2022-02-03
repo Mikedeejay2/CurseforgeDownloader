@@ -1,4 +1,5 @@
 import curseforge_dl
+from curseforge_downloader import CurseforgeDownloader
 
 # Change these values here:
 # The path to the input mods list (Text file or similar)
@@ -11,6 +12,8 @@ VERSIONS = ['1.16', '1.16.1', '1.16.2', '1.16.3', '1.16.4', '1.16.5']
 EXCLUDED = ['Fabric']
 
 if __name__ == '__main__':
-    curseforge_dl.download_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED)
+    downloader = CurseforgeDownloader(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED)
+    downloader.download_all()
+    # curseforge_dl.download_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED)
     # curseforge_dl.check_for_updates(MODS_FILE, OUTPUT_FOLDER, VERSIONS)
     # curseforge_dl.update_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS)
