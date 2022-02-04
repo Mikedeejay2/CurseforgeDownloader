@@ -5,9 +5,9 @@ import urllib.error
 import os
 from pathlib import Path
 from datetime import datetime
-from key import api_key  # Follow instructions in readme to make this compile
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from enum import Enum
+import requests
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11',
@@ -15,14 +15,13 @@ HEADERS = {
     'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3',
     'Accept-Encoding': 'none',
     'Accept-Language': 'en-US,en;q=0.8',
-    'Connection': 'keep-alive',
-    'x-api-key': api_key.API_KEY  # Follow instructions in readme to make this compile
+    'Connection': 'keep-alive'
 }
 
 # Constants for Curseforge and APIs in case of change
 CURSEFORGE = 'curseforge.com'
 CURSEFORGE_FILES = 'https://media.forgecdn.net/files/%s/%s/%s'
-CURSEFORGE_API = 'https://api.curseforge.com/v1/%s'
+CURSEFORGE_API = 'https://addons-ecs.forgesvc.net/api/v2/%s'
 
 
 class LogLevel(Enum):
@@ -106,33 +105,44 @@ class CurseforgeDownloader:
     # QUERY FUNCTIONS
     #########################################################
 
-    def __query_api(self, args: str) -> json:
+    def __query_api(self, args: str, params=None) -> json:
+        if params is None:
+            params = {}
         api_line = 'Unknown'
         try:
             api_line = CURSEFORGE_API % args
-            api_request = urllib.request.Request(api_line, headers=HEADERS)
-            api_url = urllib.request.urlopen(api_request)
-            api_json = json.loads(api_url.read().decode())
-            return api_json
+            api_request = requests.get(api_line, params=params, headers=HEADERS)
+            if api_request.status_code == 200:
+                api_json = api_request.json()
+                return api_json
+            self.__log_severe("Unable to parse json for API request: %s" % api_line)
         except urllib.error.HTTPError as e:
-            print('ERROR: API threw error %s: %s' % (e.code, api_line))
+            self.__log_severe('API threw error %s: %s' % (e.code, api_line))
             return None
 
-    def __retrieve_json_section(self, json_parent: json, section: str, search_key: str, find_value: str):
-        if section not in json_parent:
-            self.__log_warning('Unable to read API \"data\" value for game: %s' % find_value)
-            return None
-        for sub_json in json_parent['data']:
-            if search_key not in sub_json:
-                self.__log_warning('Unable to read API \"slug\" value for game: %s' % find_value)
-                return None
-            if sub_json[search_key] == find_value:
+    def __retrieve_json_section(self, json_list: json, search: Dict[str, str]):
+        # if section != '' and section not in json_parent:
+        #     self.__log_warning('Unable to read API \"%s\" value for: %s' % (search_key, find_value))
+        #     return None
+        for sub_json in json_list:
+            flag = True
+            for key, value in search.items():
+                if key not in sub_json:
+                    self.__log_warning('Unable to read API \"%s\" value for: %s' % (key, value))
+                    return None
+                if sub_json[key] != value:
+                    flag = False
+                    break
+            if flag:
                 return sub_json
+
         return None
 
     def __query_game(self, game_slug: str) -> json:
-        query = self.__query_api('games')
-        section = self.__retrieve_json_section(query, 'data', 'slug', game_slug)
+        query = self.__query_api('game')
+        section = self.__retrieve_json_section(query, {
+            'slug': game_slug
+        })
         if section is None:
             self.__log_warning('No game found for: %s' % game_slug)
             return None
@@ -150,17 +160,21 @@ class CurseforgeDownloader:
         return game_id
 
     def __query_category(self, category_slug: str, game_id: int) -> json:
-        query = self.__query_api('categories?gameId=%s' % game_id)
+        query = self.__query_api('category')
+        section = self.__retrieve_json_section(query, {
+            'slug': category_slug,
+            'gameId': game_id
+        })
+        if section is None:
+            self.__log_warning('No game found for: %s' % category_slug)
+            return None
+        return section
 
     def __query_category_id(self, category_slug: str, game_id: int) -> int:
         if category_slug in self.cache_categories:
             return self.cache_categories[category_slug]
 
-        category_json = self.__retrieve_json_section(query, 'data', 'slug', category_slug)
-        if category_json is None:
-            self.__log_warning('No category found for: %s' % category_slug)
-            return -1
-
+        category_json = self.__query_category(category_slug, game_id)
         if 'id' not in category_json:
             self.__log_warning('Unable to read API \"id\" value for category: %s' % category_slug)
             return -1
@@ -168,9 +182,27 @@ class CurseforgeDownloader:
         self.cache_categories[category_slug] = category_id
         return category_id
 
-    def __query_mod_id(self, game_id: id, category_id: int) -> int:
-        mod_json = self.__query_api('mods/search?gameId=%s&categoryId=%s' % (game_id, category_id))
-        self.__print_json(mod_json)
+    def __query_mod(self, game_id: int, section_id: int, mod_slug: str) -> json:
+        # mod_json = self.__query_api('mods/search?gameId=%s&categoryId=%s' % (game_id, category_id))
+        mod_json = self.__query_api('addon/search', {
+            'gameId': game_id,
+            'sectionId': section_id,
+            'searchFilter': mod_slug,
+            'pageSize': 10
+        })
+        for sub_json in mod_json:
+            if 'slug' in sub_json and sub_json['slug'] == mod_slug:
+                return sub_json
+        self.__log_severe("Unable to find mod of name slug: %s" % mod_slug)
+        return None
+
+    def __get_mod_id(self, mod_json: json, mod_slug: str) -> int:
+        if mod_json is None:
+            return -1
+        if 'id' not in mod_json:
+            self.__log_severe("Mod does not contain an ID: %s" % mod_slug)
+            return -1
+        return mod_json['id']
 
     #########################################################
     # FILE FUNCTIONS
@@ -193,17 +225,26 @@ class CurseforgeDownloader:
     def __download_single(self, url: str):
         url = self.__trim_url(url)
         if not self.__validate_url(url):
-            return
+            return None
         game_slug = self.__get_game_slug(url)
         category_slug = self.__get_category_slug(url)
+        mod_slug = self.__get_mod_slug(url)
         if len(game_slug) == 0 or len(category_slug) == 0:
-            return -1
+            return None
 
         game_id = self.__query_game_id(game_slug)
         if game_id < 0:
-            return -1
+            return None
         category_id = self.__query_category_id(category_slug, game_id)
-        # mod_id = self.__query_mod_id(url, game_id, category_slug)
+        if category_id < 0:
+            return None
+        mod_json = self.__query_mod(game_id, category_id, mod_slug)
+        if mod_json is None:
+            return None
+        mod_id = self.__get_mod_id(mod_json, mod_slug)
+        if mod_id < 0:
+            return None
+        print('%s: %s' % (mod_slug, mod_id))
 
     #########################################################
     # PUBLIC FUNCTIONS
@@ -212,4 +253,3 @@ class CurseforgeDownloader:
     def download_all(self):
         for mod_url in self.__read_mods():
             self.__download_single(mod_url)
-            break
