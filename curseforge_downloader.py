@@ -182,19 +182,30 @@ class CurseforgeDownloader:
         self.cache_categories[category_slug] = category_id
         return category_id
 
-    def __query_mod(self, game_id: int, section_id: int, mod_slug: str) -> json:
+    def __query_mod_recur(self, game_id: int, section_id: int, mod_slug: str, search: str):
         # mod_json = self.__query_api('mods/search?gameId=%s&categoryId=%s' % (game_id, category_id))
         mod_json = self.__query_api('addon/search', {
             'gameId': game_id,
             'sectionId': section_id,
-            'searchFilter': mod_slug,
-            'pageSize': 10
+            'searchFilter': search,
+            # 'pageSize': 10
         })
         for sub_json in mod_json:
             if 'slug' in sub_json and sub_json['slug'] == mod_slug:
                 return sub_json
-        self.__log_severe("Unable to find mod of name slug: %s" % mod_slug)
+        print(search)
+        if len(search) > 2:
+            new_search = search
+            if '-' in new_search:
+                new_search = new_search[0:new_search.rindex('-')]
+            else:
+                new_search = new_search[0:len(new_search) - 1]
+            return self.__query_mod_recur(game_id, section_id, mod_slug, new_search)
+        self.__log_severe("Unable to find mod of name slug: %s     Consider providing project ID instead" % mod_slug)
         return None
+
+    def __query_mod(self, game_id: int, section_id: int, mod_slug: str) -> json:
+        return self.__query_mod_recur(game_id, section_id, mod_slug, mod_slug)
 
     def __get_mod_id(self, mod_json: json, mod_slug: str) -> int:
         if mod_json is None:
@@ -222,29 +233,43 @@ class CurseforgeDownloader:
     # INTERMEDIARY FUNCTIONS
     #########################################################
 
-    def __download_single(self, url: str):
+    def __get_mod_info(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
         if not self.__validate_url(url):
-            return None
+            return {}
         game_slug = self.__get_game_slug(url)
         category_slug = self.__get_category_slug(url)
         mod_slug = self.__get_mod_slug(url)
         if len(game_slug) == 0 or len(category_slug) == 0:
-            return None
+            return {}
 
         game_id = self.__query_game_id(game_slug)
         if game_id < 0:
-            return None
+            return {}
         category_id = self.__query_category_id(category_slug, game_id)
         if category_id < 0:
-            return None
+            return {}
         mod_json = self.__query_mod(game_id, category_id, mod_slug)
         if mod_json is None:
-            return None
+            return {}
         mod_id = self.__get_mod_id(mod_json, mod_slug)
         if mod_id < 0:
-            return None
-        print('%s: %s' % (mod_slug, mod_id))
+            return {}
+
+        return {
+            'game_slug': game_slug,
+            'category_slug': category_slug,
+            'mod_slug': mod_slug,
+            'game_id': game_id,
+            'category_id': category_id,
+            'mod_json': mod_json,
+            'mod_id': mod_id,
+        }
+
+    def __download_single(self, url: str):
+        info = self.__get_mod_info(url)
+        if len(info) == 0:
+            return
 
     #########################################################
     # PUBLIC FUNCTIONS
