@@ -27,6 +27,7 @@ def connect():
     __create_table(TABLE_GAMES)
     __create_table(TABLE_CATEGORIES)
     __create_table(TABLE_MODS)
+    logger.log_info('(Cache) Connected to cache database successfully')
 
 
 def close():
@@ -36,7 +37,7 @@ def close():
 def insert(table: str, id_key: int, slug: str):
     db.execute("INSERT INTO `%s` VALUES ('%s', '%s');" % (table, id_key, slug))
     db.commit()
-    logger.log_info('Saved %s, %s into table %s' % (id_key, slug, table))
+    logger.log_info('(Cache) Saved %s, %s into table %s' % (id_key, slug, table))
 
 
 def get_id(table: str, slug: str) -> int:
@@ -44,4 +45,5 @@ def get_id(table: str, slug: str) -> int:
     fetched = result.fetchone()
     if result is None or fetched is None:
         return -1
+    logger.log_info('(Cache) Retrieved %s ID of \"%s\" via cache: %s' % (table, slug, fetched[0]))
     return fetched[0]

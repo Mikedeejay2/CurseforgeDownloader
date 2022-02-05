@@ -33,12 +33,17 @@ class CurseforgeDownloader:
     versions_list: list
     excluded_versions_list: list
 
+    cache_games: Dict[str, int]  # slug, id
+    cache_categories: Dict[str, int]  # slug, id
+
     def __init__(self, mods_file_path: str, output_folder_path: str, versions_list: list, excluded_versions_list: list):
         self.mods_path = mods_file_path
         self.output_path = output_folder_path
         self.versions_list = versions_list
         self.excluded_versions_list = excluded_versions_list
         self.output_log = {}
+        self.cache_games = {}
+        self.cache_categories = {}
 
     def __print_json(self, cur_json: json) -> None:
         print(json.dumps(cur_json, indent=4, sort_keys=True))
@@ -122,9 +127,11 @@ class CurseforgeDownloader:
 
     def __query_game_id(self, info: Dict[str, Any]) -> int:
         game_slug = info['game_slug']
+        if game_slug in self.cache_games:
+            return self.cache_games[game_slug]
         cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_GAMES, game_slug)
         if cache_value != -1:
-            logger.log_info('Retrieved game ID via cache: %s' % cache_value)
+            self.cache_games[game_slug] = cache_value
             return cache_value
         game_json = self.__query_game(game_slug)
         if 'id' not in game_json:
@@ -132,6 +139,7 @@ class CurseforgeDownloader:
             return -1
         game_id = game_json['id']
         curseforge_cache.insert(curseforge_cache.TABLE_GAMES, game_id, game_slug)
+        self.cache_games[game_slug] = game_id
         logger.log_info('Retrieved game ID via ForgeSVC: %s' % game_id)
         return game_id
 
@@ -149,9 +157,11 @@ class CurseforgeDownloader:
     def __query_category_id(self, info: Dict[str, Any]) -> int:
         category_slug = info['category_slug']
         game_id = info['game_id']
+        if category_slug in self.cache_categories:
+            return self.cache_categories[category_slug]
         cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_CATEGORIES, category_slug)
         if cache_value != -1:
-            logger.log_info('Retrieved category ID via cache: %s' % cache_value)
+            self.cache_categories[category_slug] = cache_value
             return cache_value
         category_json = self.__query_category(category_slug, game_id)
         if 'id' not in category_json:
@@ -159,6 +169,7 @@ class CurseforgeDownloader:
             return -1
         category_id = category_json['id']
         curseforge_cache.insert(curseforge_cache.TABLE_CATEGORIES, category_id, category_slug)
+        self.cache_categories[category_slug] = category_id
         logger.log_info('Retrieved category ID via ForgeSVC: %s' % category_id)
         return category_id
 
@@ -249,7 +260,6 @@ class CurseforgeDownloader:
         mod_id = -1
         cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_MODS, mod_slug)
         if cache_value != -1:
-            logger.log_info('Retrieved mod ID via cache: %s' % cache_value)
             mod_id = cache_value
 
         if mod_id == -1:
@@ -337,7 +347,6 @@ class CurseforgeDownloader:
 
     def __download_single(self, url: str):
         info = self.__get_mod_info(url)
-        print(info)
         if len(info) == 0:
             return
 
@@ -348,4 +357,3 @@ class CurseforgeDownloader:
     def download_all(self):
         for mod_url in self.__read_mods():
             self.__download_single(mod_url)
-            break
