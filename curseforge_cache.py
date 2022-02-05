@@ -1,5 +1,7 @@
 import sqlite3
 from sqlite3 import Connection
+from typing import Any
+
 import logger
 
 db_name = 'cache.db'
@@ -11,14 +13,16 @@ TABLE_MODS = 'Mods'
 
 ROW_ID = 'ID'
 ROW_SLUG = 'Slug'
+ROW_NAME = 'Name'
 
 
 def __create_table(table_name: str):
     db.execute('''
     CREATE TABLE IF NOT EXISTS `%s`(
     `%s` INT PRIMARY KEY NOT NULL,
+    `%s` CHAR(50) UNIQUE NOT NULL,
     `%s` CHAR(50) UNIQUE NOT NULL
-    );''' % (table_name, ROW_ID, ROW_SLUG))
+    );''' % (table_name, ROW_ID, ROW_SLUG, ROW_NAME))
 
 
 def connect():
@@ -34,16 +38,52 @@ def close():
     db.close()
 
 
-def insert(table: str, id_key: int, slug: str):
-    db.execute("INSERT INTO `%s` VALUES ('%s', '%s');" % (table, id_key, slug))
+def insert(table: str, id_key: int, slug: str, name: str):
+    db.execute("INSERT INTO `%s` VALUES ('%s', '%s', '%s');" % (table, id_key, slug, name))
     db.commit()
     logger.log_info('(Cache) Saved %s, %s into table %s' % (id_key, slug, table))
 
 
-def get_id(table: str, slug: str) -> int:
-    result = db.execute("SELECT `%s` FROM `%s` WHERE `%s`='%s';" % (ROW_ID, table, ROW_SLUG, slug))
+def select(table: str, row: str, slug: str) -> Any:
+    result = db.execute("SELECT `%s` FROM `%s` WHERE `%s`='%s';" % (row, table, ROW_SLUG, slug))
     fetched = result.fetchone()
     if result is None or fetched is None:
-        return -1
+        return None
     logger.log_info('(Cache) Retrieved %s ID of \"%s\" via cache: %s' % (table, slug, fetched[0]))
     return fetched[0]
+
+
+def get_game_id(slug: str):
+    return select(TABLE_GAMES, ROW_ID, slug)
+
+
+def get_game_name(slug: str):
+    return select(TABLE_GAMES, ROW_NAME, slug)
+
+
+def get_category_id(slug: str):
+    return select(TABLE_CATEGORIES, ROW_ID, slug)
+
+
+def get_category_name(slug: str):
+    return select(TABLE_CATEGORIES, ROW_NAME, slug)
+
+
+def get_mod_id(slug: str):
+    return select(TABLE_MODS, ROW_ID, slug)
+
+
+def get_mod_name(slug: str):
+    return select(TABLE_MODS, ROW_NAME, slug)
+
+
+def add_game(id_key: int, slug: str, name: str):
+    insert(TABLE_GAMES, id_key, slug, name)
+
+
+def add_category(id_key: int, slug: str, name: str):
+    insert(TABLE_CATEGORIES, id_key, slug, name)
+
+
+def add_mod(id_key: int, slug: str, name: str):
+    insert(TABLE_MODS, id_key, slug, name)

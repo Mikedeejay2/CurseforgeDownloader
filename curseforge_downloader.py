@@ -129,8 +129,8 @@ class CurseforgeDownloader:
         game_slug = info['game_slug']
         if game_slug in self.cache_games:
             return self.cache_games[game_slug]
-        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_GAMES, game_slug)
-        if cache_value != -1:
+        cache_value = curseforge_cache.get_game_id(game_slug)
+        if cache_value is not None:
             self.cache_games[game_slug] = cache_value
             return cache_value
         game_json = self.__query_game(game_slug)
@@ -138,7 +138,8 @@ class CurseforgeDownloader:
             logger.log_warning('Unable to read API \"id\" value for game: %s' % game_slug)
             return -1
         game_id = game_json['id']
-        curseforge_cache.insert(curseforge_cache.TABLE_GAMES, game_id, game_slug)
+        game_name = game_json['name']
+        curseforge_cache.add_game(game_id, game_slug, game_name)
         self.cache_games[game_slug] = game_id
         logger.log_info('Retrieved game ID via ForgeSVC: %s' % game_id)
         return game_id
@@ -159,8 +160,8 @@ class CurseforgeDownloader:
         game_id = info['game_id']
         if category_slug in self.cache_categories:
             return self.cache_categories[category_slug]
-        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_CATEGORIES, category_slug)
-        if cache_value != -1:
+        cache_value = curseforge_cache.get_category_id(category_slug)
+        if cache_value is not None:
             self.cache_categories[category_slug] = cache_value
             return cache_value
         category_json = self.__query_category(category_slug, game_id)
@@ -168,7 +169,8 @@ class CurseforgeDownloader:
             logger.log_warning('Unable to read API \"id\" value for category: %s' % category_slug)
             return -1
         category_id = category_json['id']
-        curseforge_cache.insert(curseforge_cache.TABLE_CATEGORIES, category_id, category_slug)
+        category_name = category_json['name']
+        curseforge_cache.add_category(category_id, category_slug, category_name)
         self.cache_categories[category_slug] = category_id
         logger.log_info('Retrieved category ID via ForgeSVC: %s' % category_id)
         return category_id
@@ -258,8 +260,8 @@ class CurseforgeDownloader:
     def __query_mod_id(self, info: Dict[str, Any]) -> int:
         mod_slug = info['mod_slug']
         mod_id = -1
-        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_MODS, mod_slug)
-        if cache_value != -1:
+        cache_value = curseforge_cache.get_mod_id(mod_slug)
+        if cache_value is not None:
             return cache_value
 
         if mod_id == -1:
@@ -277,8 +279,9 @@ class CurseforgeDownloader:
             return -1
 
         mod_id = mod_json['id']
+        mod_name = mod_json['name']
         if cache_value == -1:
-            curseforge_cache.insert(curseforge_cache.TABLE_MODS, mod_id, mod_slug)
+            curseforge_cache.add_mod(mod_id, mod_slug, mod_name)
         return mod_id
 
     #########################################################
