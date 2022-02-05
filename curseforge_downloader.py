@@ -82,14 +82,17 @@ class CurseforgeDownloader:
     #########################################################
 
     def __query(self, api: str, args: str, params=None) -> json:
-        if params is None:
-            params = {}
-        api_line = api % args
-        api_request = requests.get(api_line, params=params, headers=HEADERS)
-        if api_request.status_code == 200:
-            api_json = api_request.json()
-            return api_json
-        logger.log_severe("Unable to parse json for API request: %s %s" % (api_line, params))
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            if params is None:
+                params = {}
+            api_line = api % args
+            api_request = requests.get(api_line, params=params, headers=HEADERS)
+            if api_request.status_code == 200:
+                api_json = api_request.json()
+                return api_json
+            logger.log_severe("Unable to parse json for API request, {Try: %s/%s, Code: %s, URL: %s, Parameters: %s}" %
+                              (attempt, max_attempts, api_request.status_code, api_line, params))
 
     def __query_api(self, args: str, params=None) -> json:
         return self.__query(CURSEFORGE_API, args, params)
@@ -98,9 +101,6 @@ class CurseforgeDownloader:
         return self.__query(CFWIDGET_API, args, params)
 
     def __retrieve_json_section(self, json_list: json, search: Dict[str, str]):
-        # if section != '' and section not in json_parent:
-        #     logger.log_warning('Unable to read API \"%s\" value for: %s' % (search_key, find_value))
-        #     return None
         for sub_json in json_list:
             flag = True
             for key, value in search.items():
@@ -255,36 +255,31 @@ class CurseforgeDownloader:
             return -1
         return result['id']
 
-    def __query_mod(self, info: Dict[str, Any]) -> json:
+    def __query_mod_id(self, info: Dict[str, Any]) -> int:
         mod_slug = info['mod_slug']
         mod_id = -1
         cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_MODS, mod_slug)
         if cache_value != -1:
-            mod_id = cache_value
+            return cache_value
 
         if mod_id == -1:
             mod_id = self.__query_mod_id_retrieval(info)
         if mod_id == -1:
-            return None
+            return -1
 
         mod_json = self.__query_mod_info(mod_id)
 
         if mod_json is None:
-            return None
-
-        if cache_value == -1:
-            curseforge_cache.insert(curseforge_cache.TABLE_MODS, mod_json['id'], mod_slug)
-        return mod_json
-
-    def __get_mod_id(self, info: Dict[str, Any]) -> int:
-        mod_json = info['mod_json']
-        mod_slug = info['mod_slug']
-        if mod_json is None:
             return -1
+
         if 'id' not in mod_json:
             logger.log_severe("Mod does not contain an ID: %s" % mod_slug)
             return -1
-        return mod_json['id']
+
+        mod_id = mod_json['id']
+        if cache_value == -1:
+            curseforge_cache.insert(curseforge_cache.TABLE_MODS, mod_id, mod_slug)
+        return mod_id
 
     #########################################################
     # FILE FUNCTIONS
@@ -333,12 +328,7 @@ class CurseforgeDownloader:
             return {}
         info.update({'category_id': category_id})
 
-        mod_json = self.__query_mod(info)
-        if mod_json is None:
-            return {}
-        info.update({'mod_json': mod_json})
-
-        mod_id = self.__get_mod_id(info)
+        mod_id = self.__query_mod_id(info)
         if mod_id < 0:
             return {}
         info.update({'mod_id': mod_id})
