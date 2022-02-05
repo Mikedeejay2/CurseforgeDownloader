@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from enum import Enum
 import requests
+import logger
+import curseforge_cache
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11',
@@ -25,22 +27,11 @@ CURSEFORGE_API = 'https://addons-ecs.forgesvc.net/api/v2/%s'
 CFWIDGET_API = 'https://api.cfwidget.com/%s'
 
 
-class LogLevel(Enum):
-    INFO = 'INFO'
-    WARNING = 'WARN'
-    SEVERE = 'ERR'
-
-
 class CurseforgeDownloader:
     mods_path: str
     output_path: str
     versions_list: list
     excluded_versions_list: list
-
-    output_log: Dict[LogLevel, List[str]]
-
-    cache_games: Dict[str, int]  # slug, id
-    cache_categories: Dict[str, int]  # slug, id
 
     def __init__(self, mods_file_path: str, output_folder_path: str, versions_list: list, excluded_versions_list: list):
         self.mods_path = mods_file_path
@@ -48,30 +39,9 @@ class CurseforgeDownloader:
         self.versions_list = versions_list
         self.excluded_versions_list = excluded_versions_list
         self.output_log = {}
-        self.cache_games = {}
-        self.cache_categories = {}
-        for level in LogLevel:
-            self.output_log[level] = []
 
     def __print_json(self, cur_json: json) -> None:
         print(json.dumps(cur_json, indent=4, sort_keys=True))
-
-    #########################################################
-    # LOGGING FUNCTIONS
-    #########################################################
-
-    def __log(self, text: str, level: LogLevel):
-        print(level.value + ': ' + text)
-        self.output_log[level].append(text)
-
-    def __log_info(self, text: str):
-        self.__log(text, LogLevel.INFO)
-
-    def __log_warning(self, text: str):
-        self.__log(text, LogLevel.WARNING)
-
-    def __log_severe(self, text: str):
-        self.__log(text, LogLevel.SEVERE)
 
     #########################################################
     # UTILITY FUNCTIONS
@@ -79,14 +49,14 @@ class CurseforgeDownloader:
 
     def __validate_url(self, url: str) -> bool:
         if not url.count('/') >= 3 and url.find(CURSEFORGE):
-            self.__log_warning('URL could not be validated as CurseForge: %s' % url)
+            logger.log_warning('URL could not be validated as CurseForge: %s' % url)
             return False
         return True
 
     def __url_subarg(self, url: str, index: int) -> str:
         split = url.split('/')  # 0:curseforge.com / 1:game-slug / 2:category-slug / 3:mod-slug
         if len(split) < index:
-            self.__log_warning('Could not get URL part %s from URL: %s' % (index, url))
+            logger.log_warning('Could not get URL part %s from URL: %s' % (index, url))
             return ''
         return split[index].strip()
 
@@ -114,7 +84,7 @@ class CurseforgeDownloader:
         if api_request.status_code == 200:
             api_json = api_request.json()
             return api_json
-        self.__log_severe("Unable to parse json for API request: %s" % api_line)
+        logger.log_severe("Unable to parse json for API request: %s %s" % (api_line, params))
 
     def __query_api(self, args: str, params=None) -> json:
         return self.__query(CURSEFORGE_API, args, params)
@@ -124,13 +94,13 @@ class CurseforgeDownloader:
 
     def __retrieve_json_section(self, json_list: json, search: Dict[str, str]):
         # if section != '' and section not in json_parent:
-        #     self.__log_warning('Unable to read API \"%s\" value for: %s' % (search_key, find_value))
+        #     logger.log_warning('Unable to read API \"%s\" value for: %s' % (search_key, find_value))
         #     return None
         for sub_json in json_list:
             flag = True
             for key, value in search.items():
                 if key not in sub_json:
-                    self.__log_warning('Unable to read API \"%s\" value for: %s' % (key, value))
+                    logger.log_warning('Unable to read API \"%s\" value for: %s' % (key, value))
                     return None
                 if sub_json[key] != value:
                     flag = False
@@ -146,20 +116,23 @@ class CurseforgeDownloader:
             'slug': game_slug
         })
         if section is None:
-            self.__log_warning('No game found for: %s' % game_slug)
+            logger.log_warning('No game found for: %s' % game_slug)
             return None
         return section
 
     def __query_game_id(self, info: Dict[str, Any]) -> int:
         game_slug = info['game_slug']
-        if game_slug in self.cache_games:
-            return self.cache_games[game_slug]
+        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_GAMES, game_slug)
+        if cache_value != -1:
+            logger.log_info('Retrieved game ID via cache: %s' % cache_value)
+            return cache_value
         game_json = self.__query_game(game_slug)
         if 'id' not in game_json:
-            self.__log_warning('Unable to read API \"id\" value for game: %s' % game_slug)
+            logger.log_warning('Unable to read API \"id\" value for game: %s' % game_slug)
             return -1
         game_id = game_json['id']
-        self.cache_games[game_slug] = game_id
+        curseforge_cache.insert(curseforge_cache.TABLE_GAMES, game_id, game_slug)
+        logger.log_info('Retrieved game ID via ForgeSVC: %s' % game_id)
         return game_id
 
     def __query_category(self, category_slug: str, game_id: int) -> json:
@@ -169,22 +142,24 @@ class CurseforgeDownloader:
             'gameId': game_id
         })
         if section is None:
-            self.__log_warning('No category found for: %s' % category_slug)
+            logger.log_warning('No category found for: %s' % category_slug)
             return None
         return section
 
     def __query_category_id(self, info: Dict[str, Any]) -> int:
         category_slug = info['category_slug']
         game_id = info['game_id']
-        if category_slug in self.cache_categories:
-            return self.cache_categories[category_slug]
-
+        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_CATEGORIES, category_slug)
+        if cache_value != -1:
+            logger.log_info('Retrieved category ID via cache: %s' % cache_value)
+            return cache_value
         category_json = self.__query_category(category_slug, game_id)
         if 'id' not in category_json:
-            self.__log_warning('Unable to read API \"id\" value for category: %s' % category_slug)
+            logger.log_warning('Unable to read API \"id\" value for category: %s' % category_slug)
             return -1
         category_id = category_json['id']
-        self.cache_categories[category_slug] = category_id
+        curseforge_cache.insert(curseforge_cache.TABLE_CATEGORIES, category_id, category_slug)
+        logger.log_info('Retrieved category ID via ForgeSVC: %s' % category_id)
         return category_id
 
     def __query_mod_search(self, info: Dict[str, Any], search: str):
@@ -198,6 +173,8 @@ class CurseforgeDownloader:
             'searchFilter': search,
             # 'pageSize': 10
         })
+        if mod_json is None:
+            return
         for sub_json in mod_json:
             if 'slug' in sub_json and sub_json['slug'] == mod_slug:
                 return sub_json
@@ -213,14 +190,14 @@ class CurseforgeDownloader:
     def __query_mod_cfwidget(self, info: Dict[str, Any]) -> json:
         result = self.__query_cfwidget('%s/%s/%s' % (info['game_slug'], info['category_slug'], info['mod_slug']))
         if result is None:
-            self.__log_warning('No mod found for: %s' % info['mod_slug'])
+            logger.log_warning('No mod found for: %s' % info['mod_slug'])
             return None
         return result
 
     def __query_mod_info(self, mod_id: int) -> json:
         result = self.__query_api('addon/%s' % str(mod_id))
         if result is None:
-            self.__log_severe('Unable to retrieve mod of ID from API: %s' % mod_id)
+            logger.log_severe('Unable to retrieve mod of ID from API: %s' % mod_id)
             return None
         return result
 
@@ -229,7 +206,7 @@ class CurseforgeDownloader:
         while True:
             mod_id = input("Mod ID: ")
             if mod_id.lower() == 'exit':
-                self.__log_severe('Skipping mod due to denial of manual user input: %s' % info['mod_slug'])
+                logger.log_severe('Skipping mod due to denial of manual user input: %s' % info['mod_slug'])
                 break
             if not mod_id.isdigit():
                 print('The value entered is not a valid ID. Please try again.')
@@ -245,30 +222,48 @@ class CurseforgeDownloader:
             break
         return mod_json
 
-    def __query_mod(self, info: Dict[str, Any]) -> json:
-        result = self.__query_mod_search(info, info['mod_slug'])
+    def __query_mod_id_retrieval(self, info: Dict[str, Any]) -> int:
+        mod_slug = info['mod_slug']
+        result = self.__query_mod_search(info, mod_slug)
         if result is not None:
-            self.__log_info("Mod information retrieved via ForgeSVC API: %s" % info['mod_slug'])
+            logger.log_info("Mod information retrieved via ForgeSVC API: %s" % mod_slug)
         if result is None:
-            self.__log_warning('Unable to retrieve mod from ForgeSVC API, trying CFWidget API: %s' % info['mod_slug'])
+            logger.log_warning('Unable to retrieve mod from ForgeSVC API, trying CFWidget API: %s' % mod_slug)
             result = self.__query_mod_cfwidget(info)
             if result is not None:
-                self.__log_info("Mod information retrieved via CFWidget API: %s" % info['mod_slug'])
+                logger.log_info("Mod information retrieved via CFWidget API: %s" % mod_slug)
         if result is None:
             print('Unable to get mod \"%s\" through URL provided, please paste the ID of the mod from the mod URL: %s' %
                   (info['mod_slug'], info['url']))
             result = self.__query_mod_manual(info)
             if result is not None:
-                self.__log_info("Mod information retrieved via manual user input: %s" % info['mod_slug'])
+                logger.log_info("Mod information retrieved via manual user input: %s" % mod_slug)
 
         if 'id' not in result:
-            self.__log_severe('Unable to retrieve mod ID; attempted all available methods: %s' % info['mod_slug'])
+            logger.log_severe('Unable to retrieve mod ID; attempted all available methods: %s' % mod_slug)
+            return -1
+        return result['id']
+
+    def __query_mod(self, info: Dict[str, Any]) -> json:
+        mod_slug = info['mod_slug']
+        mod_id = -1
+        cache_value = curseforge_cache.get_id(curseforge_cache.TABLE_MODS, mod_slug)
+        if cache_value != -1:
+            logger.log_info('Retrieved mod ID via cache: %s' % cache_value)
+            mod_id = cache_value
+
+        if mod_id == -1:
+            mod_id = self.__query_mod_id_retrieval(info)
+        if mod_id == -1:
             return None
 
-        mod_json = self.__query_mod_info(result['id'])
+        mod_json = self.__query_mod_info(mod_id)
 
         if mod_json is None:
             return None
+
+        if cache_value == -1:
+            curseforge_cache.insert(curseforge_cache.TABLE_MODS, mod_json['id'], mod_slug)
         return mod_json
 
     def __get_mod_id(self, info: Dict[str, Any]) -> int:
@@ -277,7 +272,7 @@ class CurseforgeDownloader:
         if mod_json is None:
             return -1
         if 'id' not in mod_json:
-            self.__log_severe("Mod does not contain an ID: %s" % mod_slug)
+            logger.log_severe("Mod does not contain an ID: %s" % mod_slug)
             return -1
         return mod_json['id']
 
