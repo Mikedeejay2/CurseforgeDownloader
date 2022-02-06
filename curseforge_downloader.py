@@ -52,6 +52,12 @@ class CurseforgeDownloader:
     # UTILITY FUNCTIONS
     #########################################################
 
+    def __get_datetime(self, unparsed_time: str) -> datetime:
+        if '.' not in unparsed_time:
+            return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%SZ')
+
+        return datetime.strptime(unparsed_time, '%Y-%m-%dT%H:%M:%S.%fZ')
+
     def __validate_url(self, url: str) -> bool:
         if not url.count('/') >= 3 and url.find(CURSEFORGE):
             logger.log_warning('URL could not be validated as CurseForge: %s' % url)
@@ -275,7 +281,7 @@ class CurseforgeDownloader:
             return -1
 
         if 'id' not in mod_json:
-            logger.log_severe("Mod does not contain an ID: %s" % mod_slug)
+            logger.log_severe('Mod does not contain an ID: %s' % mod_slug)
             return -1
 
         mod_id = mod_json['id']
@@ -283,6 +289,12 @@ class CurseforgeDownloader:
         if cache_value is None:
             curseforge_cache.add_mod(mod_id, mod_slug, mod_name)
         return mod_id
+
+    def __query_mod_files(self, info: Dict[str, Any]) -> json:
+        result = self.__query_api('addon/%s/files' % info['mod_id'])
+        if result is None:
+            logger.log_severe('Unable to retrieve mod files')
+        return result
 
     #########################################################
     # FILE FUNCTIONS
@@ -336,12 +348,18 @@ class CurseforgeDownloader:
             return {}
         info.update({'mod_id': mod_id})
 
+        files_json = self.__query_mod_files(info)
+        if files_json is None:
+            return {}
+        info.update({'files_json': files_json})
+
         return info
 
     def __download_single(self, url: str):
         info = self.__get_mod_info(url)
         if len(info) == 0:
             return
+
 
     #########################################################
     # PUBLIC FUNCTIONS
@@ -350,3 +368,4 @@ class CurseforgeDownloader:
     def download_all(self):
         for mod_url in self.__read_mods():
             self.__download_single(mod_url)
+            break
