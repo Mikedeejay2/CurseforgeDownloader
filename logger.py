@@ -1,6 +1,5 @@
 from enum import Enum
-
-history = {}
+from typing import List, Tuple
 
 
 class LogLevel(Enum):
@@ -9,8 +8,8 @@ class LogLevel(Enum):
     SEVERE = 'ERR'
 
 
-for loglevel in LogLevel:
-    history[loglevel] = []
+# history: List[Tuple[LogLevel, str]]
+history = []
 
 
 #########################################################
@@ -19,7 +18,7 @@ for loglevel in LogLevel:
 
 def log(text: str, level: LogLevel):
     print(level.value + ': ' + text)
-    history[level].append(text)
+    history.append((level, str))
 
 
 def log_info(text: str):
