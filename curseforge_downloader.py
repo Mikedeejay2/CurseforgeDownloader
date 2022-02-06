@@ -280,7 +280,7 @@ class CurseforgeDownloader:
 
         mod_id = mod_json['id']
         mod_name = mod_json['name']
-        if cache_value == -1:
+        if cache_value is None:
             curseforge_cache.add_mod(mod_id, mod_slug, mod_name)
         return mod_id
 
