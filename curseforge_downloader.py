@@ -5,7 +5,8 @@ import urllib.error
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Any
+import time
+from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum
 import requests
 import logger
@@ -36,7 +37,39 @@ class CurseforgeDownloader:
     cache_games: Dict[str, int]  # slug, id
     cache_categories: Dict[str, int]  # slug, id
 
+    mod_urls: List[str]  # url
+    mod_files: List[Tuple[str, str, datetime]]  # path+name, name, modified time
+
+    #########################################################
+    # FILE FUNCTIONS
+    #########################################################
+
+    def __read_file(self, file_path: str) -> List[str]:
+        file = open(file_path, 'r')
+        if file is None:
+            print('File \"%s\" could not be found!' % file_path)
+            return []
+        return file.readlines()
+
+    def __read_mods(self) -> List[str]:
+        return self.__read_file(self.mods_path)
+
+    def __compile_file_time_pairs(self, dir_path: str) -> List[Tuple[str, str, datetime]]:
+        result_list = []
+        out_path_list = os.listdir(dir_path)
+        for cur_name in out_path_list:
+            new_path = os.path.join(dir_path, cur_name)
+            modified_time = os.path.getmtime(new_path)
+            modified_datetime = datetime.fromtimestamp(modified_time)
+            result_list.append((new_path, cur_name, modified_datetime))
+        return result_list
+
+    #########################################################
+    # CONSTRUCTOR FUNCTIONS
+    #########################################################
+
     def __init__(self, mods_file_path: str, output_folder_path: str, versions_list: list, excluded_versions_list: list):
+        logger.log_info('Initializing CurseForge Downloader...')
         self.mods_path = mods_file_path
         self.output_path = output_folder_path
         self.versions_list = versions_list
@@ -44,13 +77,16 @@ class CurseforgeDownloader:
         self.output_log = {}
         self.cache_games = {}
         self.cache_categories = {}
-
-    def __print_json(self, cur_json: json) -> None:
-        print(json.dumps(cur_json, indent=4, sort_keys=True))
+        self.mod_urls = self.__read_mods()
+        self.mod_files = self.__compile_file_time_pairs(self.output_path)
+        logger.log_info('Successfully initialized CurseForge Downloader.')
 
     #########################################################
     # UTILITY FUNCTIONS
     #########################################################
+
+    def __print_json(self, cur_json: json) -> None:
+        print(json.dumps(cur_json, indent=4, sort_keys=True))
 
     def __get_datetime(self, unparsed_time: str) -> datetime:
         if '.' not in unparsed_time:
@@ -297,20 +333,6 @@ class CurseforgeDownloader:
         return result
 
     #########################################################
-    # FILE FUNCTIONS
-    #########################################################
-
-    def __read_file(self, file_path: str) -> List[str]:
-        file = open(file_path, 'r')
-        if file is None:
-            print('File \"%s\" could not be found!' % file_path)
-            return []
-        return file.readlines()
-
-    def __read_mods(self) -> List[str]:
-        return self.__read_file(self.mods_path)
-
-    #########################################################
     # INTERMEDIARY FUNCTIONS
     #########################################################
 
@@ -355,17 +377,20 @@ class CurseforgeDownloader:
 
         return info
 
-    def __download_single(self, url: str):
+    def __download_single(self, url: str) -> bool:
         info = self.__get_mod_info(url)
         if len(info) == 0:
-            return
-
+            return False
+        return True
 
     #########################################################
     # PUBLIC FUNCTIONS
     #########################################################
 
     def download_all(self):
-        for mod_url in self.__read_mods():
-            self.__download_single(mod_url)
+        count = 0
+        for mod_url in self.mod_urls:
+            if self.__download_single(mod_url):
+                count += 1
             break
+        logger.log_info("Successfully downloaded %s/%s mods" % (count, len(self.mod_urls)))
