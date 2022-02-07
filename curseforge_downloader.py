@@ -38,7 +38,7 @@ class CurseforgeDownloader:
     cache_categories: Dict[str, int]  # slug, id
 
     mod_urls: List[str]  # url
-    mod_files: List[Tuple[str, str, datetime]]  # path+name, name, modified time
+    mod_files: Dict[str, datetime]  # name, modified time
 
     #########################################################
     # FILE FUNCTIONS
@@ -54,14 +54,14 @@ class CurseforgeDownloader:
     def __read_mods(self) -> List[str]:
         return self.__read_file(self.mods_path)
 
-    def __compile_file_time_pairs(self, dir_path: str) -> List[Tuple[str, str, datetime]]:
-        result_list = []
+    def __compile_file_time_pairs(self, dir_path: str) -> Dict[str, datetime]:
+        result_list = {}
         out_path_list = os.listdir(dir_path)
         for cur_name in out_path_list:
             new_path = os.path.join(dir_path, cur_name)
             modified_time = os.path.getmtime(new_path)
             modified_datetime = datetime.fromtimestamp(modified_time)
-            result_list.append((new_path, cur_name, modified_datetime))
+            result_list.update({cur_name: modified_datetime})
         return result_list
 
     #########################################################
