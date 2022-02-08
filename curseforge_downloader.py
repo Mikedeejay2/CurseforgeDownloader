@@ -119,6 +119,10 @@ class CurseforgeDownloader:
     def __trim_url(self, url: str):
         return url.replace('https://', '').strip()
 
+    def __version_compat(self, file_json: json) -> bool:
+        print('not yet implemented')
+        return False
+
     #########################################################
     # QUERY FUNCTIONS
     #########################################################
@@ -336,6 +340,12 @@ class CurseforgeDownloader:
     # INTERMEDIARY FUNCTIONS
     #########################################################
 
+    def __get_latest_file(self, info: Dict[str, Any]) -> json:
+        files_json = info['files_json']
+        for cur_json in files_json:
+            self.__print_json(cur_json)
+
+
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
         if not self.__validate_url(url):
@@ -374,6 +384,8 @@ class CurseforgeDownloader:
         if files_json is None:
             return {}
         info.update({'files_json': files_json})
+
+        latest_file_json = self.__get_latest_file(info)
 
         return info
 
