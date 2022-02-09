@@ -120,8 +120,17 @@ class CurseforgeDownloader:
         return url.replace('https://', '').strip()
 
     def __version_compat(self, file_json: json) -> bool:
-        print('not yet implemented')
-        return False
+        if 'gameVersion' not in file_json:
+            return False
+        game_versions = file_json['gameVersion']
+        result = False
+        for game_version in game_versions:
+            if game_version in self.versions_list:
+                result = True
+            elif game_version in self.excluded_versions_list:
+                result = False
+                break
+        return result
 
     #########################################################
     # QUERY FUNCTIONS
@@ -342,9 +351,19 @@ class CurseforgeDownloader:
 
     def __get_latest_file(self, info: Dict[str, Any]) -> json:
         files_json = info['files_json']
+        latest = datetime.min
+        latest_json = None
         for cur_json in files_json:
-            self.__print_json(cur_json)
+            if not self.__version_compat(cur_json):
+                continue
+            if 'fileDate' not in cur_json:
+                continue
+            file_date = self.__get_datetime(cur_json['fileDate'])
+            if file_date > latest:
+                latest = file_date
+                latest_json = cur_json
 
+        return latest_json
 
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
@@ -385,7 +404,10 @@ class CurseforgeDownloader:
             return {}
         info.update({'files_json': files_json})
 
-        latest_file_json = self.__get_latest_file(info)
+        latest_json = self.__get_latest_file(info)
+        if latest_json is None:
+            return {}
+        info.update({'latest_json': latest_json})
 
         return info
 
