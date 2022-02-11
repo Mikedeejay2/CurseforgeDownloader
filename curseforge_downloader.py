@@ -38,7 +38,7 @@ class CurseforgeDownloader:
     cache_categories: Dict[str, int]  # slug, id
 
     mod_urls: List[str]  # url
-    mod_files: Dict[str, datetime]  # name, modified time
+    mod_files: List[str]  # name
 
     #########################################################
     # FILE FUNCTIONS
@@ -47,21 +47,25 @@ class CurseforgeDownloader:
     def __read_file(self, file_path: str) -> List[str]:
         file = open(file_path, 'r')
         if file is None:
-            print('File \"%s\" could not be found!' % file_path)
+            logger.log_warning('File \"%s\" could not be found!' % file_path)
             return []
         return file.readlines()
 
     def __read_mods(self) -> List[str]:
         return self.__read_file(self.mods_path)
 
-    def __compile_file_time_pairs(self, dir_path: str) -> Dict[str, datetime]:
-        result_list = {}
+    def __get_file_datetime(self, file_path: str) -> datetime:
+        modified_time = os.path.getmtime(file_path)
+        return datetime.fromtimestamp(modified_time)
+
+    def __get_file_size(self, file_path: str):
+        return os.path.getsize(file_path)
+
+    def __compile_file_time_pairs(self, dir_path: str) -> List[str]:
+        result_list = []
         out_path_list = os.listdir(dir_path)
         for cur_name in out_path_list:
-            new_path = os.path.join(dir_path, cur_name)
-            modified_time = os.path.getmtime(new_path)
-            modified_datetime = datetime.fromtimestamp(modified_time)
-            result_list.update({cur_name: modified_datetime})
+            result_list.append(cur_name)
         return result_list
 
     #########################################################
@@ -132,6 +136,15 @@ class CurseforgeDownloader:
                 break
         return result
 
+    def __strip_str(self, string: str) -> str:
+        return string.lower().replace(' ', '').replace('-', '').replace('.', '')
+
+    def __get_list_values(self, input_json: json, find_value: str) -> List[str]:
+        output_list = list()
+        for cur_json in input_json:
+            output_list.append(cur_json[find_value])
+        return output_list
+
     #########################################################
     # QUERY FUNCTIONS
     #########################################################
@@ -145,14 +158,18 @@ class CurseforgeDownloader:
             api_request = requests.get(api_line, params=params, headers=HEADERS)
             if api_request.status_code == 200:
                 api_json = api_request.json()
+                logger.log_info('Query successfully completed')
                 return api_json
-            logger.log_severe("Unable to parse json for API request, {Try: %s/%s, Code: %s, URL: %s, Parameters: %s}" %
+            logger.log_severe('Unable to parse json for API request, {Try: %s/%s, Code: %s, URL: %s, Parameters: %s}' %
                               (attempt, max_attempts, api_request.status_code, api_line, params))
+        logger.log_info('Query failed')
 
     def __query_api(self, args: str, params=None) -> json:
+        logger.log_info('Querying ForgeSVC API: %s' % args)
         return self.__query(CURSEFORGE_API, args, params)
 
     def __query_cfwidget(self, args: str, params=None) -> json:
+        logger.log_info('Querying CFWidget API: %s' % args)
         return self.__query(CFWIDGET_API, args, params)
 
     def __retrieve_json_section(self, json_list: json, search: Dict[str, str]):
@@ -380,11 +397,90 @@ class CurseforgeDownloader:
                               info['mod_name'])
         return new_json
 
-    def __needs_update(self, info: Dict[str, Any]) -> bool:
+    def __get_common_name(self, info: Dict[str, Any]) -> str:
+        # Use unfiltered files json just in case user has mod of different version installed
+        file_names = info['unfiltered_file_names']
+        common_name = self.__strip_str(file_names[0])
+        for cur_name in file_names:
+            cur_name = self.__strip_str(cur_name)
+            new_common = ''
+            for index in range(len(cur_name)):
+                char_cur = cur_name[index]
+                if index >= len(common_name):
+                    break
+                char_com = common_name[index]
+
+                if char_cur != char_com:
+                    break
+                new_common += char_cur
+            common_name = new_common
+        return common_name
+
+    def __filter_by_common_name(self, info: Dict[str, Any]) -> List[str]:
+        files_list = list()
+        common_name = self.__get_common_name(info)
+        if len(common_name) == 0:
+            return self.mod_files
+
+        # sort with common name
+        for file_name in self.mod_files:
+            stripped_name = self.__strip_str(file_name)
+            if not stripped_name.startswith(common_name):
+                continue
+            files_list.append(file_name)
+        return files_list
+
+    def __filter_by_compare_name(self, info: Dict[str, Any], files_list: List[str]) -> List[str]:
+        file_names = info['unfiltered_file_names']
+        new_names = list()
+        for file_name in files_list:
+            if file_name in file_names:
+                new_names.append(file_name)
+        return new_names
+
+    def __get_filtered_files(self, info: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        files_list = self.__filter_by_common_name(info)
+        # even if one file is found be absolutely sure that it's an official mod file
+        files_list = self.__filter_by_compare_name(info, files_list)
+
+        files_dict = dict()
+        for file_name in files_list:
+            file_path = os.path.join(self.output_path, file_name)
+            file_time = self.__get_file_datetime(file_path)
+            file_size = self.__get_file_size(file_path)
+            files_dict.update({file_name: {'time': file_time, 'size': file_size}})
+        print(files_dict)
+        return files_dict
+
+    def __check_name_overlap(self, info: Dict[str, Any]) -> bool:
         files_json = info['files_json']
-        print('Not yet implemented')
+        files_list = info['file_names']
+
+        test_set = set()
+        for file_name in files_list:
+            if file_name in test_set:
+                return True
+            test_set.add(file_name)
 
         return False
+
+    def __check_needs_update_normal(self, info: Dict[str, Any]) -> bool:
+        existing_files = info['existing_files']
+        files_json = info['files_json']
+        latest_json = info['latest_json']
+        # if len(existing_files) > 0:
+        #     logger.log_warning('Update checker located more than one version of mod \"%s\" in the output folder: %s' %
+        #                        (info['mod_name'], list(existing_files.keys())))
+        #     return True
+        return False
+
+    def __check_needs_update(self, info: Dict[str, Any]) -> bool:
+        files_json = info['files_json']
+        files_dict = info['existing_files']
+        file_names_overlap = self.__check_name_overlap(info)
+        if file_names_overlap:
+            print('special check')
+        return self.__check_needs_update_normal(info)
 
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
@@ -425,17 +521,26 @@ class CurseforgeDownloader:
             return {}
         info.update({'mod_name': mod_name})
 
-        files_json = self.__query_mod_files(info)
-        if files_json is None:
+        unfiltered_files_json = self.__query_mod_files(info)
+        if unfiltered_files_json is None:
             return {}
-        files_json = self.__filter_files_json(info, files_json)
+        info.update({'unfiltered_files_json': unfiltered_files_json})
+        files_json = self.__filter_files_json(info, unfiltered_files_json)
         info.update({'files_json': files_json})
 
         latest_json = self.__get_latest_file(info)
         if latest_json is None:
             return {}
-
         info.update({'latest_json': latest_json})
+
+        unfiltered_file_names = self.__get_list_values(unfiltered_files_json, 'fileName')
+        info.update({'unfiltered_file_names': unfiltered_file_names})
+
+        file_names = self.__get_list_values(files_json, 'fileName')
+        info.update({'file_names': file_names})
+
+        existing_files = self.__get_filtered_files(info)
+        info.update({'existing_files': existing_files})
 
         return info
 
@@ -443,6 +548,8 @@ class CurseforgeDownloader:
         info = self.__get_mod_info(url)
         if len(info) == 0:
             return False
+
+        needs_update = self.__check_needs_update(info)
         return True
 
     #########################################################
