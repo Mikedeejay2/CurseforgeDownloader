@@ -449,7 +449,6 @@ class CurseforgeDownloader:
             file_time = self.__get_file_datetime(file_path)
             file_size = self.__get_file_size(file_path)
             files_dict.update({file_name: {'time': file_time, 'size': file_size}})
-        print(files_dict)
         return files_dict
 
     def __check_name_overlap(self, info: Dict[str, Any]) -> bool:
@@ -465,21 +464,43 @@ class CurseforgeDownloader:
         return False
 
     def __check_needs_update_normal(self, info: Dict[str, Any]) -> bool:
-        existing_files = info['existing_files']
-        files_json = info['files_json']
         latest_json = info['latest_json']
-        # if len(existing_files) > 0:
-        #     logger.log_warning('Update checker located more than one version of mod \"%s\" in the output folder: %s' %
-        #                        (info['mod_name'], list(existing_files.keys())))
-        #     return True
-        return False
+        existing_files = info['existing_files']
+        latest_name = latest_json['fileName']
+        existing_name = list(existing_files.keys())[0]
+        return existing_name != latest_name
+
+    def __check_needs_update_special(self, info: Dict[str, Any]) -> bool:
+        latest_json = info['latest_json']
+        existing_files = info['existing_files']
+        existing_files: dict
+        existing_tuple = list(existing_files.values())[0]
+        latest_datetime = info['latest_datetime']
+        existing_datetime = existing_tuple['time']
+
+        # Compare times, if downloaded file is modified before the date of the latest upload, return true
+        if existing_datetime < latest_datetime:
+            return True
+
+        # Compare the file sizes, if sizes are different, expect outdated.
+        # There is an extreme edge case here that both the current file and latest file have the exact same
+        # file size but are different versions. This is fixable, but it would take even more iterating.
+        latest_size = latest_json['fileLength']
+        existing_size = existing_tuple['size']
+        return latest_size != existing_size
 
     def __check_needs_update(self, info: Dict[str, Any]) -> bool:
-        files_json = info['files_json']
-        files_dict = info['existing_files']
+        existing_files = info['existing_files']
+        if len(existing_files) > 1:
+            logger.log_warning('More than one version of mod \"%s\" was located in the output folder: %s' %
+                               (info['mod_name'], list(existing_files.keys())))
+            return True
+        if len(existing_files) == 0:
+            return True
+
         file_names_overlap = self.__check_name_overlap(info)
         if file_names_overlap:
-            print('special check')
+            return self.__check_needs_update_special(info)
         return self.__check_needs_update_normal(info)
 
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
@@ -532,6 +553,9 @@ class CurseforgeDownloader:
         if latest_json is None:
             return {}
         info.update({'latest_json': latest_json})
+
+        latest_datetime = self.__get_datetime(latest_json['fileDate'])
+        info.update({'latest_datetime': latest_datetime})
 
         unfiltered_file_names = self.__get_list_values(unfiltered_files_json, 'fileName')
         info.update({'unfiltered_file_names': unfiltered_file_names})
