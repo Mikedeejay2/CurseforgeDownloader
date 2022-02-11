@@ -49,7 +49,7 @@ def select(table: str, row: str, slug: str) -> Any:
     fetched = result.fetchone()
     if result is None or fetched is None:
         return None
-    logger.log_info('(Cache) Retrieved %s ID of \"%s\" via cache: %s' % (table, slug, fetched[0]))
+    logger.log_info('(Cache) Retrieved %s %s of \"%s\" via cache: %s' % (table, row, slug, fetched[0]))
     return fetched[0]
 
 

@@ -345,6 +345,9 @@ class CurseforgeDownloader:
             logger.log_severe('Unable to retrieve mod files')
         return result
 
+    def __query_mod_name(self, info) -> str:
+        return curseforge_cache.get_mod_name(info['mod_slug'])
+
     #########################################################
     # INTERMEDIARY FUNCTIONS
     #########################################################
@@ -364,6 +367,24 @@ class CurseforgeDownloader:
                 latest_json = cur_json
 
         return latest_json
+
+    def __filter_files_json(self, info: Dict[str, Any], files_json: json) -> json:
+        new_json = []
+        for cur_json in files_json:
+            if not self.__version_compat(cur_json):
+                continue
+            new_json.append(cur_json)
+
+        if len(new_json) == 0:
+            logger.log_severe('There are no files for mod \"%s\" that match the types specified in properties' %
+                              info['mod_name'])
+        return new_json
+
+    def __needs_update(self, info: Dict[str, Any]) -> bool:
+        files_json = info['files_json']
+        print('Not yet implemented')
+
+        return False
 
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
@@ -399,14 +420,21 @@ class CurseforgeDownloader:
             return {}
         info.update({'mod_id': mod_id})
 
+        mod_name = self.__query_mod_name(info)
+        if mod_name is None:
+            return {}
+        info.update({'mod_name': mod_name})
+
         files_json = self.__query_mod_files(info)
         if files_json is None:
             return {}
+        files_json = self.__filter_files_json(info, files_json)
         info.update({'files_json': files_json})
 
         latest_json = self.__get_latest_file(info)
         if latest_json is None:
             return {}
+
         info.update({'latest_json': latest_json})
 
         return info
