@@ -29,6 +29,11 @@ CFWIDGET_API = 'https://api.cfwidget.com/%s'
 
 
 class CurseforgeDownloader:
+    class DownloadStatus(Enum):
+        ERROR = 'Error'
+        SUCCESS = 'Successful'
+        IGNORED = 'Ignored'
+
     mods_path: str
     output_path: str
     versions_list: list
@@ -68,6 +73,26 @@ class CurseforgeDownloader:
             result_list.append(cur_name)
         return result_list
 
+    def __download_file(self, file_path: str, download_url: str) -> bool:
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            request = requests.get(download_url, stream=True)
+            if request.status_code != 200:
+                logger.log_severe('Unable to access download URL, {Try: %s/%s, Code: %s, URL: %s}' %
+                                  (attempt+1, max_attempts, request.status_code, download_url))
+                return False
+            file = open(file_path, 'wb')
+            for chunk in request.iter_content(chunk_size=8192):
+                file.write(chunk)
+            file.close()
+            request.close()
+            return True
+        return False
+
+    def __init_output_path(self):
+        if not os.path.exists(self.output_path):
+            os.makedirs(self.output_path)
+
     #########################################################
     # CONSTRUCTOR FUNCTIONS
     #########################################################
@@ -76,11 +101,11 @@ class CurseforgeDownloader:
         logger.log_info('Initializing CurseForge Downloader...')
         self.mods_path = mods_file_path
         self.output_path = output_folder_path
+        self.__init_output_path()
         self.versions_list = versions_list
         self.excluded_versions_list = excluded_versions_list
-        self.output_log = {}
-        self.cache_games = {}
-        self.cache_categories = {}
+        self.cache_games = dict()
+        self.cache_categories = dict()
         self.mod_urls = self.__read_mods()
         self.mod_files = self.__compile_file_time_pairs(self.output_path)
         logger.log_info('Successfully initialized CurseForge Downloader.')
@@ -145,6 +170,13 @@ class CurseforgeDownloader:
             output_list.append(cur_json[find_value])
         return output_list
 
+    def __get_time_difference(self, time1: datetime, time2: datetime) -> Tuple[int, int]:
+        time_difference = (time2 - time1)
+        total_seconds = time_difference.total_seconds()
+        minutes = int(total_seconds / 60)
+        seconds = int(total_seconds % 60)
+        return minutes, seconds
+
     #########################################################
     # QUERY FUNCTIONS
     #########################################################
@@ -161,7 +193,7 @@ class CurseforgeDownloader:
                 logger.log_info('Query successfully completed')
                 return api_json
             logger.log_severe('Unable to parse json for API request, {Try: %s/%s, Code: %s, URL: %s, Parameters: %s}' %
-                              (attempt, max_attempts, api_request.status_code, api_line, params))
+                              (attempt+1, max_attempts, api_request.status_code, api_line, params))
         logger.log_info('Query failed')
 
     def __query_api(self, args: str, params=None) -> json:
@@ -503,6 +535,21 @@ class CurseforgeDownloader:
             return self.__check_needs_update_special(info)
         return self.__check_needs_update_normal(info)
 
+    def __remove_old_files(self, info: Dict[str, Any]):
+        existing_files = info['existing_files']
+        for file_name in existing_files:
+            file_path = os.path.join(self.output_path, file_name)
+            logger.log_info('Removing old file: %s' % file_name)
+            os.remove(file_path)
+
+    def __download_mod_file(self, info: Dict[str, Any]) -> bool:
+        latest_json = info['latest_json']
+        file_name = latest_json['fileName']
+        download_url = latest_json['downloadUrl']
+        logger.log_info('Starting download of mod: %s' % info['mod_name'])
+        self.__download_file(os.path.join(self.output_path, file_name), download_url)
+        logger.log_info('Download finished successfully')
+
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
         if not self.__validate_url(url):
@@ -568,22 +615,77 @@ class CurseforgeDownloader:
 
         return info
 
-    def __download_single(self, url: str) -> bool:
-        info = self.__get_mod_info(url)
-        if len(info) == 0:
+    def __check_for_updates(self, info: Dict[str, Any]) -> bool:
+        needs_update = self.__check_needs_update(info)
+        mod_name = info['mod_name']
+        if not needs_update:
+            logger.log_info('The latest version of mod \"%s\" is already downloaded' % mod_name)
             return False
 
-        needs_update = self.__check_needs_update(info)
+        logger.log_info('The mod \"%s\" has an update available.' % mod_name)
         return True
+
+    def __download_single(self, url: str) -> DownloadStatus:
+        info = self.__get_mod_info(url)
+        if len(info) == 0:
+            return self.DownloadStatus.ERROR
+
+        needs_update = self.__check_for_updates(info)
+        if not needs_update:
+            return self.DownloadStatus.IGNORED
+
+        self.__remove_old_files(info)
+        self.__download_mod_file(info)
+
+        return self.DownloadStatus.SUCCESS
+
+    def __print_results(self, results: List[Tuple[str, str]], time_difference: Tuple[int, int]):
+        total_success = 0
+        total_counts = dict()
+        for category in self.DownloadStatus:
+            total_counts[category.value] = 0
+
+        print('\n---------------------------------')
+        print('Detailed results:')
+        for mod_url, result in results:
+            total_counts[result] = int(total_counts[result]) + 1
+            if result == self.DownloadStatus.SUCCESS.value or \
+               result == self.DownloadStatus.IGNORED.value:
+                total_success += 1
+            print('%s: %s' % (result, mod_url))
+
+        print('\n---------------------------------')
+        print('Error log:')
+        errors_found = False
+        for entry in logger.history:
+            level = entry[0]
+            text = entry[1]
+            if level == logger.LogLevel.INFO:
+                continue
+            errors_found = True
+            print('%s: %s' % (level.value, text))
+        if not errors_found:
+            print('Script executed with no errors')
+
+        print('\n---------------------------------')
+        print('Overview results:')
+        for category, count in total_counts.items():
+            print('%s: %s' % (category, count))
+        print('Total successful: %s/%s' % (total_success, len(results)))
+        print('Total time taken: %s minutes, %s seconds' % (time_difference[0], time_difference[1]))
 
     #########################################################
     # PUBLIC FUNCTIONS
     #########################################################
 
     def download_all(self):
-        count = 0
+        results = list()
+        pre_time = datetime.now()
+
         for mod_url in self.mod_urls:
-            if self.__download_single(mod_url):
-                count += 1
-            break
-        logger.log_info("Successfully downloaded %s/%s mods" % (count, len(self.mod_urls)))
+            result = self.__download_single(mod_url)
+            results.append((mod_url.strip(), result.value))
+        logger.log_info('Finished downloading all mods')
+        post_time = datetime.now()
+
+        self.__print_results(results, self.__get_time_difference(pre_time, post_time))

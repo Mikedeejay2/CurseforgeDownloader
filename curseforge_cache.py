@@ -39,6 +39,7 @@ def close():
 
 
 def insert(table: str, id_key: int, slug: str, name: str):
+    name = name.replace('\'', '\'\'')
     db.execute("INSERT INTO `%s` VALUES ('%s', '%s', '%s');" % (table, id_key, slug, name))
     db.commit()
     logger.log_info('(Cache) Saved %s, %s into table %s' % (id_key, slug, table))

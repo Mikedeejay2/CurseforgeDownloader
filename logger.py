@@ -18,7 +18,7 @@ history = []
 
 def log(text: str, level: LogLevel):
     print(level.value + ': ' + text)
-    history.append((level, str))
+    history.append((level, text))
 
 
 def log_info(text: str):
