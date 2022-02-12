@@ -39,8 +39,9 @@ class CurseforgeDownloader:
 
     mods_path: str
     output_path: str
-    versions_list: list
-    excluded_versions_list: list
+    versions_list: List[str]
+    excluded_versions_list: List[str]
+    release_types_list: List[FileReleaseType]
 
     cache_games: Dict[str, int]  # slug, id
     cache_categories: Dict[str, int]  # slug, id
@@ -48,7 +49,7 @@ class CurseforgeDownloader:
     mod_urls: List[str]  # url
     mod_files: List[str]  # name
 
-    process_results: List[Tuple[str, str]] # url, status
+    process_results: List[Tuple[str, str]]  # url, status
 
     #########################################################
     # FILE FUNCTIONS
@@ -113,13 +114,19 @@ class CurseforgeDownloader:
     # CONSTRUCTOR FUNCTIONS
     #########################################################
 
-    def __init__(self, mods_file_path: str, output_folder_path: str, versions_list: list, excluded_versions_list: list):
+    def __init__(self,
+                 mods_file_path: str,
+                 output_folder_path: str,
+                 versions_list: List[str],
+                 excluded_versions_list: List[str],
+                 release_types_list: List[FileReleaseType]):
         logger.log_info('Initializing CurseForge Downloader...')
         self.mods_path = mods_file_path
         self.output_path = output_folder_path
         self.__init_output_path()
         self.versions_list = versions_list
         self.excluded_versions_list = excluded_versions_list
+        self.release_types_list = release_types_list
         self.cache_games = dict()
         self.cache_categories = dict()
         self.process_results = list()
@@ -168,6 +175,13 @@ class CurseforgeDownloader:
     def __version_compat(self, file_json: json) -> bool:
         if 'gameVersion' not in file_json:
             return False
+        if 'releaseType' not in file_json:
+            return False
+        file_status = file_json['releaseType']
+        release_type = FileReleaseType(file_status)
+        if release_type not in self.release_types_list:
+            return False
+
         game_versions = file_json['gameVersion']
         result = False
         for game_version in game_versions:
