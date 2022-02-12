@@ -741,7 +741,7 @@ class CurseforgeDownloader:
             if result == self.DownloadStatus.SUCCESS.value or \
                result == self.DownloadStatus.IGNORED.value:
                 total_success += 1
-            print('%s: %s' % (result, mod_url))
+            print('%s: %s' % (result, mod_url.strip()))
 
         print('\n---------------------------------')
         print('Error log:')
