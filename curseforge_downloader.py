@@ -172,14 +172,14 @@ class CurseforgeDownloader:
     def __trim_url(self, url: str):
         return url.replace('https://', '').strip()
 
-    def __version_compat(self, file_json: json) -> bool:
+    def __version_compat(self, file_json: json, check_releases: bool) -> bool:
         if 'gameVersion' not in file_json:
             return False
         if 'releaseType' not in file_json:
             return False
         file_status = file_json['releaseType']
         release_type = FileReleaseType(file_status)
-        if release_type not in self.release_types_list:
+        if release_type not in self.release_types_list and check_releases:
             return False
 
         game_versions = file_json['gameVersion']
@@ -448,12 +448,12 @@ class CurseforgeDownloader:
     # INTERMEDIARY FUNCTIONS
     #########################################################
 
-    def __get_latest_file(self, info: Dict[str, Any]) -> json:
+    def __get_latest_file(self, info: Dict[str, Any], check_releases: bool) -> json:
         files_json = info['files_json']
         latest = datetime.min
         latest_json = None
         for cur_json in files_json:
-            if not self.__version_compat(cur_json):
+            if not self.__version_compat(cur_json, check_releases):
                 continue
             if 'fileDate' not in cur_json:
                 continue
@@ -462,12 +462,16 @@ class CurseforgeDownloader:
                 latest = file_date
                 latest_json = cur_json
 
+        # If there are no non-release type specific files, check for all release types
+        if check_releases and latest_json is None:
+            return self.__get_latest_file(info, False)
+
         return latest_json
 
     def __filter_files_json(self, info: Dict[str, Any], files_json: json) -> json:
         new_json = []
         for cur_json in files_json:
-            if not self.__version_compat(cur_json):
+            if not self.__version_compat(cur_json, False):
                 continue
             new_json.append(cur_json)
 
@@ -679,7 +683,7 @@ class CurseforgeDownloader:
         files_json = self.__filter_files_json(info, unfiltered_files_json)
         info.update({'files_json': files_json})
 
-        latest_json = self.__get_latest_file(info)
+        latest_json = self.__get_latest_file(info, True)
         if latest_json is None:
             return {}
         info.update({'latest_json': latest_json})
