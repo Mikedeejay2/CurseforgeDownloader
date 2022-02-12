@@ -9,6 +9,8 @@ import time
 from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum
 import requests
+
+from curseforge_api_schemas import FileRelationType, FileStatus, FileReleaseType
 import logger
 import curseforge_cache
 
@@ -23,6 +25,7 @@ HEADERS = {
 
 # Constants for Curseforge and APIs in case of change
 CURSEFORGE = 'curseforge.com'
+CURSEFORGE_LINK = 'https://www.curseforge.com/%s/%s/%s'
 CURSEFORGE_FILES = 'https://media.forgecdn.net/files/%s/%s/%s'
 CURSEFORGE_API = 'https://addons-ecs.forgesvc.net/api/v2/%s'
 CFWIDGET_API = 'https://api.cfwidget.com/%s'
@@ -45,6 +48,8 @@ class CurseforgeDownloader:
     mod_urls: List[str]  # url
     mod_files: List[str]  # name
 
+    process_results: List[Tuple[str, str]] # url, status
+
     #########################################################
     # FILE FUNCTIONS
     #########################################################
@@ -54,7 +59,9 @@ class CurseforgeDownloader:
         if file is None:
             logger.log_warning('File \"%s\" could not be found!' % file_path)
             return []
-        return file.readlines()
+        lines = file.readlines()
+        file.close()
+        return lines
 
     def __read_mods(self) -> List[str]:
         return self.__read_file(self.mods_path)
@@ -93,6 +100,15 @@ class CurseforgeDownloader:
         if not os.path.exists(self.output_path):
             os.makedirs(self.output_path)
 
+    def __write_append_file(self, file_path: str, data: str):
+        file = open(file_path, 'a')
+        file.write(data)
+        file.close()
+
+    def __add_mod_to_file(self, mod_url: str):
+        logger.log_info('Adding missing dependency to mods list: %s' % mod_url)
+        self.__write_append_file(self.mods_path, '\n' + mod_url)
+
     #########################################################
     # CONSTRUCTOR FUNCTIONS
     #########################################################
@@ -106,6 +122,7 @@ class CurseforgeDownloader:
         self.excluded_versions_list = excluded_versions_list
         self.cache_games = dict()
         self.cache_categories = dict()
+        self.process_results = list()
         self.mod_urls = self.__read_mods()
         self.mod_files = self.__compile_file_time_pairs(self.output_path)
         logger.log_info('Successfully initialized CurseForge Downloader.')
@@ -133,7 +150,7 @@ class CurseforgeDownloader:
         split = url.split('/')  # 0:curseforge.com / 1:game-slug / 2:category-slug / 3:mod-slug
         if len(split) < index:
             logger.log_warning('Could not get URL part %s from URL: %s' % (index, url))
-            return ''
+            return str()
         return split[index].strip()
 
     def __get_game_slug(self, url: str) -> str:
@@ -191,9 +208,11 @@ class CurseforgeDownloader:
             if api_request.status_code == 200:
                 api_json = api_request.json()
                 logger.log_info('Query successfully completed')
+                api_request.close()
                 return api_json
             logger.log_severe('Unable to parse json for API request, {Try: %s/%s, Code: %s, URL: %s, Parameters: %s}' %
                               (attempt+1, max_attempts, api_request.status_code, api_line, params))
+            api_request.close()
         logger.log_info('Query failed')
 
     def __query_api(self, args: str, params=None) -> json:
@@ -311,7 +330,7 @@ class CurseforgeDownloader:
             return None
         return result
 
-    def __query_mod_info(self, mod_id: int) -> json:
+    def __query_mod_json(self, mod_id: int) -> json:
         result = self.__query_api('addon/%s' % str(mod_id))
         if result is None:
             logger.log_severe('Unable to retrieve mod of ID from API: %s' % mod_id)
@@ -328,7 +347,7 @@ class CurseforgeDownloader:
             if not mod_id.isdigit():
                 print('The value entered is not a valid ID. Please try again.')
                 continue
-            mod_json = self.__query_mod_info(int(mod_id))
+            mod_json = self.__query_mod_json(int(mod_id))
             if mod_json is None or 'slug' not in mod_json:
                 print('The value entered is not a valid ID. Please try again.')
                 continue
@@ -373,7 +392,7 @@ class CurseforgeDownloader:
         if mod_id == -1:
             return -1
 
-        mod_json = self.__query_mod_info(mod_id)
+        mod_json = self.__query_mod_json(mod_id)
 
         if mod_json is None:
             return -1
@@ -396,6 +415,20 @@ class CurseforgeDownloader:
 
     def __query_mod_name(self, info) -> str:
         return curseforge_cache.get_mod_name(info['mod_slug'])
+
+    def __query_dependency_slug(self, info: Dict[str, Any], dependency_json: json) -> str:
+        dependency_id = dependency_json['addonId']
+
+        mod_slug = curseforge_cache.get_mod_slug(dependency_id)
+        if mod_slug is None:
+            dependency_json = self.__query_mod_json(dependency_id)
+            if dependency_json is None:
+                return str()
+            if 'slug' not in dependency_json:
+                logger.log_warning('Could not obtain slug of dependency for mod: %s' % info['mod_name'])
+                return str()
+            mod_slug = dependency_json['slug']
+        return mod_slug
 
     #########################################################
     # INTERMEDIARY FUNCTIONS
@@ -542,13 +575,49 @@ class CurseforgeDownloader:
             logger.log_info('Removing old file: %s' % file_name)
             os.remove(file_path)
 
-    def __download_mod_file(self, info: Dict[str, Any]) -> bool:
+    def __download_mod_file(self, info: Dict[str, Any]):
         latest_json = info['latest_json']
         file_name = latest_json['fileName']
         download_url = latest_json['downloadUrl']
         logger.log_info('Starting download of mod: %s' % info['mod_name'])
         self.__download_file(os.path.join(self.output_path, file_name), download_url)
         logger.log_info('Download finished successfully')
+
+    def __get_dependency_url(self, info: Dict[str, Any], dependency_slug: str) -> str:
+        return CURSEFORGE_LINK % (info['game_slug'], info['category_slug'], dependency_slug)
+
+    def __check_dependencies(self, info: Dict[str, Any]):
+        latest_json = info['latest_json']
+        if 'dependencies' not in latest_json or len(latest_json['dependencies']) == 0:
+            logger.log_info('The mod \"%s\" has no dependencies that need to be downloaded' % info['mod_name'])
+            return True
+        dependencies_list = latest_json['dependencies']
+        for dependency in dependencies_list:
+            if 'addonId' not in dependency or 'type' not in dependency:
+                logger.log_warning('Dependency for \"%s\" could not be read properly' % info['mod_name'])
+                continue
+            dependency_type = dependency['type']
+            if dependency_type != FileRelationType.REQUIRED_DEPENDENCY.value:
+                continue
+            dependency_slug = self.__query_dependency_slug(info, dependency)
+            if len(dependency_slug) == 0:
+                continue
+
+            dependency_url = self.__get_dependency_url(info, dependency_slug)
+            dependency_url_s = self.__trim_url(dependency_url)
+            found = False
+            for mod_url in self.mod_urls:
+                mod_url_s = self.__trim_url(mod_url)
+                if dependency_url_s == mod_url_s:
+                    found = True
+                    break
+            if found:
+                logger.log_info('Dependency \"%s\" for mod \"%s\" is already in the downloads list' %
+                                (dependency_slug, info['mod_name']))
+                continue
+            self.__add_mod_to_file(dependency_url)
+            self.mod_urls.append(dependency_url)
+
 
     def __get_mod_preinfo(self, url: str) -> Dict[str, Any]:
         url = self.__trim_url(url)
@@ -630,6 +699,8 @@ class CurseforgeDownloader:
         if len(info) == 0:
             return self.DownloadStatus.ERROR
 
+        self.__check_dependencies(info)
+
         needs_update = self.__check_for_updates(info)
         if not needs_update:
             return self.DownloadStatus.IGNORED
@@ -639,7 +710,7 @@ class CurseforgeDownloader:
 
         return self.DownloadStatus.SUCCESS
 
-    def __print_results(self, results: List[Tuple[str, str]], time_difference: Tuple[int, int]):
+    def __print_results(self, time_difference: Tuple[int, int]):
         total_success = 0
         total_counts = dict()
         for category in self.DownloadStatus:
@@ -647,7 +718,7 @@ class CurseforgeDownloader:
 
         print('\n---------------------------------')
         print('Detailed results:')
-        for mod_url, result in results:
+        for mod_url, result in self.process_results:
             total_counts[result] = int(total_counts[result]) + 1
             if result == self.DownloadStatus.SUCCESS.value or \
                result == self.DownloadStatus.IGNORED.value:
@@ -671,7 +742,7 @@ class CurseforgeDownloader:
         print('Overview results:')
         for category, count in total_counts.items():
             print('%s: %s' % (category, count))
-        print('Total successful: %s/%s' % (total_success, len(results)))
+        print('Total successful: %s/%s' % (total_success, len(self.process_results)))
         print('Total time taken: %s minutes, %s seconds' % (time_difference[0], time_difference[1]))
 
     #########################################################
@@ -679,13 +750,12 @@ class CurseforgeDownloader:
     #########################################################
 
     def download_all(self):
-        results = list()
         pre_time = datetime.now()
 
         for mod_url in self.mod_urls:
             result = self.__download_single(mod_url)
-            results.append((mod_url.strip(), result.value))
+            self.process_results.append((mod_url, result.value))
         logger.log_info('Finished downloading all mods')
         post_time = datetime.now()
 
-        self.__print_results(results, self.__get_time_difference(pre_time, post_time))
+        self.__print_results(self.__get_time_difference(pre_time, post_time))

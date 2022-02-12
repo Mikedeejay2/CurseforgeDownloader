@@ -45,8 +45,8 @@ def insert(table: str, id_key: int, slug: str, name: str):
     logger.log_info('(Cache) Saved %s, %s into table %s' % (id_key, slug, table))
 
 
-def select(table: str, row: str, slug: str) -> Any:
-    result = db.execute("SELECT `%s` FROM `%s` WHERE `%s`='%s';" % (row, table, ROW_SLUG, slug))
+def select(table: str, row: str, slug: str, selecting_row: str) -> Any:
+    result = db.execute("SELECT `%s` FROM `%s` WHERE `%s`='%s';" % (row, table, selecting_row, slug))
     fetched = result.fetchone()
     if result is None or fetched is None:
         return None
@@ -55,27 +55,39 @@ def select(table: str, row: str, slug: str) -> Any:
 
 
 def get_game_id(slug: str):
-    return select(TABLE_GAMES, ROW_ID, slug)
+    return select(TABLE_GAMES, ROW_ID, slug, ROW_SLUG)
 
 
 def get_game_name(slug: str):
-    return select(TABLE_GAMES, ROW_NAME, slug)
+    return select(TABLE_GAMES, ROW_NAME, slug, ROW_SLUG)
 
 
 def get_category_id(slug: str):
-    return select(TABLE_CATEGORIES, ROW_ID, slug)
+    return select(TABLE_CATEGORIES, ROW_ID, slug, ROW_SLUG)
 
 
 def get_category_name(slug: str):
-    return select(TABLE_CATEGORIES, ROW_NAME, slug)
+    return select(TABLE_CATEGORIES, ROW_NAME, slug, ROW_SLUG)
 
 
 def get_mod_id(slug: str):
-    return select(TABLE_MODS, ROW_ID, slug)
+    return select(TABLE_MODS, ROW_ID, slug, ROW_SLUG)
 
 
 def get_mod_name(slug: str):
-    return select(TABLE_MODS, ROW_NAME, slug)
+    return select(TABLE_MODS, ROW_NAME, slug, ROW_SLUG)
+
+
+def get_game_slug(game_id: str):
+    return select(TABLE_GAMES, ROW_SLUG, game_id, ROW_ID)
+
+
+def get_category_slug(category_id: str):
+    return select(TABLE_CATEGORIES, ROW_SLUG, category_id, ROW_ID)
+
+
+def get_mod_slug(mod_id: str):
+    return select(TABLE_MODS, ROW_SLUG, mod_id, ROW_ID)
 
 
 def add_game(id_key: int, slug: str, name: str):
