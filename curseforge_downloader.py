@@ -107,7 +107,7 @@ class CurseforgeDownloader:
         file.close()
 
     def __add_mod_to_file(self, mod_url: str):
-        logger.log_info('Adding missing dependency to mods list: %s' % mod_url)
+        logger.log_warning('Adding missing dependency to mods list: %s' % mod_url)
         self.__write_append_file(self.mods_path, '\n' + mod_url)
 
     #########################################################
