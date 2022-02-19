@@ -1,5 +1,5 @@
 import curseforge_dl
-from curseforge_downloader import CurseforgeDownloader
+from curseforge_downloader import CurseForgeDownloader
 import curseforge_cache
 from curseforge_api_schemas import FileReleaseType
 
@@ -17,7 +17,7 @@ RELEASE_TYPES = [FileReleaseType.RELEASE, FileReleaseType.BETA, FileReleaseType.
 
 if __name__ == '__main__':
     curseforge_cache.connect()
-    downloader = CurseforgeDownloader(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED, RELEASE_TYPES)
+    downloader = CurseForgeDownloader(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED, RELEASE_TYPES)
     downloader.download_all()
     curseforge_cache.close()
     # curseforge_dl.download_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED)

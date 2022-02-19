@@ -31,7 +31,7 @@ CURSEFORGE_API = 'https://addons-ecs.forgesvc.net/api/v2/%s'
 CFWIDGET_API = 'https://api.cfwidget.com/%s'
 
 
-class CurseforgeDownloader:
+class CurseForgeDownloader:
     class DownloadStatus(Enum):
         ERROR = 'Error'
         SUCCESS = 'Successful'
