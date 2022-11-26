@@ -9,10 +9,13 @@ import time
 from typing import List, Dict, Optional, Any, Tuple
 from enum import Enum
 import requests
+from dotenv import load_dotenv
 
 from curseforge_api_schemas import FileRelationType, FileStatus, FileReleaseType
 import logger
 import curseforge_cache
+
+load_dotenv(os.path.join(os.getcwd(), '.env'))
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11',
@@ -20,15 +23,15 @@ HEADERS = {
     'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3',
     'Accept-Encoding': 'none',
     'Accept-Language': 'en-US,en;q=0.8',
-    'Connection': 'keep-alive'
+    'Connection': 'keep-alive',
+    'x-api-key': os.environ.get('ETERNAL_API_KEY')
 }
 
 # Constants for Curseforge and APIs in case of change
 CURSEFORGE = 'curseforge.com'
 CURSEFORGE_LINK = 'https://www.curseforge.com/%s/%s/%s'
-CURSEFORGE_FILES = 'https://media.forgecdn.net/files/%s/%s/%s'
-CURSEFORGE_API = 'https://addons-ecs.forgesvc.net/api/v2/%s'
-CFWIDGET_API = 'https://api.cfwidget.com/%s'
+CURSEFORGE_FILES = 'https://mediafilez.forgecdn.net/files/%s/%s/%s'
+CURSEFORGE_API = 'https://api.curseforge.com/v1/%s'
 
 
 class CurseForgeDownloader:
@@ -173,7 +176,7 @@ class CurseForgeDownloader:
         return url.replace('https://', '').strip()
 
     def __version_compat(self, file_json: json, releases: List[FileReleaseType]) -> bool:
-        if 'gameVersion' not in file_json:
+        if 'gameVersions' not in file_json:
             return False
         if 'releaseType' not in file_json:
             return False
@@ -182,7 +185,7 @@ class CurseForgeDownloader:
         if release_type not in releases:
             return False
 
-        game_versions = file_json['gameVersion']
+        game_versions = file_json['gameVersions']
         result = False
         for game_version in game_versions:
             if game_version in self.versions_list:
@@ -230,12 +233,8 @@ class CurseForgeDownloader:
         logger.log_info('Query failed')
 
     def __query_api(self, args: str, params=None) -> json:
-        logger.log_info('Querying ForgeSVC API: %s' % args)
+        logger.log_info('Querying Eternal API: %s' % args)
         return self.__query(CURSEFORGE_API, args, params)
-
-    def __query_cfwidget(self, args: str, params=None) -> json:
-        logger.log_info('Querying CFWidget API: %s' % args)
-        return self.__query(CFWIDGET_API, args, params)
 
     def __retrieve_json_section(self, json_list: json, search: Dict[str, str]):
         for sub_json in json_list:
@@ -253,8 +252,8 @@ class CurseForgeDownloader:
         return None
 
     def __query_game(self, game_slug: str) -> json:
-        query = self.__query_api('game')
-        section = self.__retrieve_json_section(query, {
+        query = self.__query_api('games')
+        section = self.__retrieve_json_section(query['data'], {
             'slug': game_slug
         })
         if section is None:
@@ -278,12 +277,12 @@ class CurseForgeDownloader:
         game_name = game_json['name']
         curseforge_cache.add_game(game_id, game_slug, game_name)
         self.cache_games[game_slug] = game_id
-        logger.log_info('Retrieved game ID via ForgeSVC: %s' % game_id)
+        logger.log_info('Retrieved game ID via Eternal: %s' % game_id)
         return game_id
 
     def __query_category(self, category_slug: str, game_id: int) -> json:
-        query = self.__query_api('category')
-        section = self.__retrieve_json_section(query, {
+        query = self.__query_api('categories', {'gameId': game_id})
+        section = self.__retrieve_json_section(query['data'], {
             'slug': category_slug,
             'gameId': game_id
         })
@@ -309,47 +308,33 @@ class CurseForgeDownloader:
         category_name = category_json['name']
         curseforge_cache.add_category(category_id, category_slug, category_name)
         self.cache_categories[category_slug] = category_id
-        logger.log_info('Retrieved category ID via ForgeSVC: %s' % category_id)
+        logger.log_info('Retrieved category ID via Eternal: %s' % category_id)
         return category_id
 
-    def __query_mod_search(self, info: Dict[str, Any], search: str):
+    def __query_mod_search(self, info: Dict[str, Any]):
         game_id = info['game_id']
         category_id = info['category_id']
         mod_slug = info['mod_slug']
-        # mod_json = self.__query_api('mods/search?gameId=%s&categoryId=%s' % (game_id, category_id))
-        mod_json = self.__query_api('addon/search', {
+        mod_json = self.__query_api('mods/search', {
             'gameId': game_id,
-            'sectionId': category_id,
-            'searchFilter': search,
-            # 'pageSize': 10
+            'classId': category_id,
+            'slug': mod_slug,
+            'pageSize': 50,
+            'index': 0
         })
         if mod_json is None:
             return
-        for sub_json in mod_json:
+        for sub_json in mod_json['data']:
             if 'slug' in sub_json and sub_json['slug'] == mod_slug:
                 return sub_json
-        if len(search) > 2:
-            new_search = search
-            if '-' in new_search:
-                new_search = new_search[0:new_search.rindex('-')]
-            else:
-                new_search = new_search[0:len(new_search) - 1]
-            return self.__query_mod_search(info, new_search)
         return None
 
-    def __query_mod_cfwidget(self, info: Dict[str, Any]) -> json:
-        result = self.__query_cfwidget('%s/%s/%s' % (info['game_slug'], info['category_slug'], info['mod_slug']))
-        if result is None:
-            logger.log_warning('No mod found for: %s' % info['mod_slug'])
-            return None
-        return result
-
     def __query_mod_json(self, mod_id: int) -> json:
-        result = self.__query_api('addon/%s' % str(mod_id))
+        result = self.__query_api('mods/%s' % str(mod_id))
         if result is None:
             logger.log_severe('Unable to retrieve mod of ID from API: %s' % mod_id)
             return None
-        return result
+        return result['data']
 
     def __query_mod_manual(self, info: Dict[str, Any]) -> json:
         mod_json = None
@@ -367,21 +352,16 @@ class CurseForgeDownloader:
                 continue
             if mod_json['slug'] != info['mod_slug']:
                 print('The required mod \"%s\" does not match the retrieved mod \"%s\". Please enter the correct ID.' %
-                      (info['slug'], mod_json['slug']))
+                      (info['mod_slug'], mod_json['slug']))
                 continue
             break
         return mod_json
 
     def __query_mod_id_retrieval(self, info: Dict[str, Any]) -> int:
         mod_slug = info['mod_slug']
-        result = self.__query_mod_search(info, mod_slug)
+        result = self.__query_mod_search(info)
         if result is not None:
-            logger.log_info("Mod information retrieved via ForgeSVC API: %s" % mod_slug)
-        if result is None:
-            logger.log_warning('Unable to retrieve mod from ForgeSVC API, trying CFWidget API: %s' % mod_slug)
-            result = self.__query_mod_cfwidget(info)
-            if result is not None:
-                logger.log_info("Mod information retrieved via CFWidget API: %s" % mod_slug)
+            logger.log_info("Mod information retrieved via Eternal API: %s" % mod_slug)
         if result is None:
             print('Unable to get mod \"%s\" through URL provided, please paste the ID of the mod from the mod URL: %s' %
                   (info['mod_slug'], info['url']))
@@ -422,8 +402,13 @@ class CurseForgeDownloader:
         return mod_id
 
     def __query_mod_files(self, info: Dict[str, Any]) -> json:
-        result = self.__query_api('addon/%s/files' % info['mod_id'])
-        if result is None:
+        result = []
+        for i in range(0, 10000, 50):
+            cur_result = self.__query_api('mods/%s/files' % info['mod_id'], {'index': i})
+            if len(cur_result['data']) == 0:
+                break
+            result.extend(cur_result['data'])
+        if len(result) == 0:
             logger.log_severe('Unable to retrieve mod files')
         return result
 
@@ -431,7 +416,7 @@ class CurseForgeDownloader:
         return curseforge_cache.get_mod_name(info['mod_slug'])
 
     def __query_dependency_slug(self, info: Dict[str, Any], dependency_json: json) -> str:
-        dependency_id = dependency_json['addonId']
+        dependency_id = dependency_json['modId']
 
         mod_slug = curseforge_cache.get_mod_slug(dependency_id)
         if mod_slug is None:
@@ -474,10 +459,6 @@ class CurseForgeDownloader:
             if not self.__version_compat(cur_json, self.release_types_list):
                 continue
             new_json.append(cur_json)
-
-        if len(new_json) == 0:
-            logger.log_severe('There are no files for mod \"%s\" that match the types specified in properties' %
-                              info['mod_name'])
         return new_json
 
     def __get_common_name(self, info: Dict[str, Any]) -> str:
@@ -526,7 +507,7 @@ class CurseForgeDownloader:
         # even if one file is found be absolutely sure that it's an official mod file
         files_list = self.__filter_by_compare_name(info, files_list)
 
-        files_dict = dict()
+        files_dict = {}
         for file_name in files_list:
             file_path = os.path.join(self.output_path, file_name)
             file_time = self.__get_file_datetime(file_path)
@@ -597,7 +578,9 @@ class CurseForgeDownloader:
         latest_json = info['latest_json']
         file_name = latest_json['fileName']
         download_url = latest_json['downloadUrl']
-        logger.log_info('Starting download of mod: %s' % info['mod_name'])
+        if download_url is None:
+            download_url = CURSEFORGE_FILES % (str(latest_json['id'])[:4], str(latest_json['id'])[4:], file_name)
+        logger.log_info('Starting download of mod: %s %s' % (info['mod_name'], file_name))
         self.__download_file(os.path.join(self.output_path, file_name), download_url)
         logger.log_info('Download finished successfully')
 
@@ -611,10 +594,10 @@ class CurseForgeDownloader:
             return True
         dependencies_list = latest_json['dependencies']
         for dependency in dependencies_list:
-            if 'addonId' not in dependency or 'type' not in dependency:
+            if 'modId' not in dependency or 'relationType' not in dependency:
                 logger.log_warning('Dependency for \"%s\" could not be read properly' % info['mod_name'])
                 continue
-            dependency_type = dependency['type']
+            dependency_type = dependency['relationType']
             if dependency_type != FileRelationType.REQUIRED_DEPENDENCY.value:
                 continue
             dependency_slug = self.__query_dependency_slug(info, dependency)

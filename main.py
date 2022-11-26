@@ -1,4 +1,6 @@
-import curseforge_dl
+import os
+from os import path
+from dotenv import load_dotenv
 from curseforge_downloader import CurseForgeDownloader
 import curseforge_cache
 from curseforge_api_schemas import FileReleaseType
@@ -20,6 +22,3 @@ if __name__ == '__main__':
     downloader = CurseForgeDownloader(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED, RELEASE_TYPES)
     downloader.download_all()
     curseforge_cache.close()
-    # curseforge_dl.download_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS, EXCLUDED)
-    # curseforge_dl.check_for_updates(MODS_FILE, OUTPUT_FOLDER, VERSIONS)
-    # curseforge_dl.update_all(MODS_FILE, OUTPUT_FOLDER, VERSIONS)
